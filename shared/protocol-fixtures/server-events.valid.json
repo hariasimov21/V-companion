@@ -1,0 +1,21 @@
+[
+  {
+    "type": "session_ready",
+    "protocol_version": 1,
+    "character_name": "Akari",
+    "ai_provider": "mock",
+    "ai_is_remote": false,
+    "privacy": { "microphone_enabled": false, "camera_enabled": false, "remote_vision_enabled": false },
+    "state": "idle"
+  },
+  { "type": "state_changed", "state": "thinking" },
+  {
+    "type": "assistant_message",
+    "text": "Hola, estoy funcionando.",
+    "emotion": "happy",
+    "emotion_intensity": 0.8,
+    "gesture": "nod",
+    "look_at_user": true
+  },
+  { "type": "error", "code": "ai_timeout", "message": "The AI took too long to answer" }
+]

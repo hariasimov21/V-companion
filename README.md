@@ -1,4 +1,4 @@
-# Virtual Companion (malfoid)
+# Virtual Companion 
 
 Aplicación de escritorio con un personaje anime interactivo: mezcla de VTuber, asistente de
 IA y personaje persistente. Diseñada de forma modular para crecer por fases: chat → avatar

@@ -6,6 +6,8 @@ class ErrorCode(StrEnum):
     AI_TIMEOUT = "ai_timeout"
     INVALID_MESSAGE = "invalid_message"
     BUSY = "busy"
+    UNKNOWN_CHARACTER = "unknown_character"
+    UNKNOWN_MODEL = "unknown_model"
     INTERNAL_ERROR = "internal_error"
 
 
@@ -37,3 +39,7 @@ class InvalidStateTransition(AppError):
 
 class BusyError(AppError):
     code = ErrorCode.BUSY
+
+
+class UnknownModelError(AppError):
+    code = ErrorCode.UNKNOWN_MODEL

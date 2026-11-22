@@ -32,4 +32,5 @@ def _create_ollama_provider(settings: Settings) -> OllamaProvider:
         timeout_seconds=settings.ai_timeout_seconds,
         think=think,
         keep_alive=settings.ollama_keep_alive,
+        num_ctx=settings.ollama_num_ctx,
     )

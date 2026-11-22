@@ -3,7 +3,7 @@
  * Both sides are tested against shared/protocol-fixtures/ to catch drift.
  */
 
-export const PROTOCOL_VERSION = 1
+export const PROTOCOL_VERSION = 4
 
 export const EMOTIONS = [
   'neutral',
@@ -40,6 +40,8 @@ export const ERROR_CODES = [
   'ai_timeout',
   'invalid_message',
   'busy',
+  'unknown_character',
+  'unknown_model',
   'internal_error',
 ] as const
 export type ErrorCode = (typeof ERROR_CODES)[number]
@@ -52,14 +54,55 @@ export interface PrivacySettings {
 
 // --- Server -> Client ---------------------------------------------------------
 
+export interface CharacterSummary {
+  id: string
+  name: string
+}
+
+/** A past chat message, so a resumed conversation can be shown. */
+export interface HistoryEntry {
+  role: 'user' | 'assistant'
+  text: string
+  emotion?: Emotion | null
+  gesture?: Gesture | null
+}
+
 export interface SessionReadyEvent {
   type: 'session_ready'
   protocol_version: number
+  character_id: string
   character_name: string
+  characters: CharacterSummary[]
+  history: HistoryEntry[]
   ai_provider: string
   ai_is_remote: boolean
+  /** Model in use and the installed ones the user can switch to (empty = not switchable). */
+  ai_model: string | null
+  ai_models: string[]
+  ai_model_loading: boolean
   privacy: PrivacySettings
   state: AssistantPhase
+}
+
+/** Broadcast after a switch: show that character's own conversation and swap the avatar. */
+export interface CharacterChangedEvent {
+  type: 'character_changed'
+  character_id: string
+  character_name: string
+  history: HistoryEntry[]
+}
+
+/** Broadcast after a character's conversation was forgotten: empty the chat. */
+export interface ConversationClearedEvent {
+  type: 'conversation_cleared'
+  character_id: string
+}
+
+/** Sent while a newly selected model loads (loading: true) and once it is ready. */
+export interface ModelChangedEvent {
+  type: 'model_changed'
+  model: string
+  loading: boolean
 }
 
 export interface StateChangedEvent {
@@ -82,7 +125,14 @@ export interface ErrorEvent {
   message: string
 }
 
-export type ServerEvent = SessionReadyEvent | StateChangedEvent | AssistantMessageEvent | ErrorEvent
+export type ServerEvent =
+  | SessionReadyEvent
+  | CharacterChangedEvent
+  | ConversationClearedEvent
+  | ModelChangedEvent
+  | StateChangedEvent
+  | AssistantMessageEvent
+  | ErrorEvent
 
 // --- Client -> Server ---------------------------------------------------------
 
@@ -95,4 +145,25 @@ export interface SpeechFinishedEvent {
   type: 'speech_finished'
 }
 
-export type ClientEvent = UserMessageEvent | SpeechFinishedEvent
+export interface SelectCharacterEvent {
+  type: 'select_character'
+  character_id: string
+}
+
+/** Forgets the active character's whole conversation. */
+export interface ClearConversationEvent {
+  type: 'clear_conversation'
+}
+
+/** Switches the AI model for every character (installed local models only). */
+export interface SelectModelEvent {
+  type: 'select_model'
+  model: string
+}
+
+export type ClientEvent =
+  | UserMessageEvent
+  | SpeechFinishedEvent
+  | SelectCharacterEvent
+  | ClearConversationEvent
+  | SelectModelEvent

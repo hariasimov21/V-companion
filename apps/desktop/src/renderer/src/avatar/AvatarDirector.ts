@@ -16,6 +16,13 @@ export class AvatarDirector {
     if (phase !== 'speaking') this.avatar.setMouthOpen(0)
   }
 
+  /** Back to a calm, neutral pose (e.g. a different character took over). */
+  reset(): void {
+    void this.avatar.setExpression({ emotion: 'neutral', intensity: 0.5 })
+    this.avatar.setSpeaking(false)
+    this.avatar.setMouthOpen(0)
+  }
+
   onAssistantMessage(message: AssistantMessageEvent): void {
     void this.avatar.setExpression({
       emotion: message.emotion,

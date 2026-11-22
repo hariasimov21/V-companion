@@ -7,8 +7,12 @@ from app.container import AppContainer
 from app.core.errors import AppError, ErrorCode
 from app.core.logging import get_logger
 from app.models.protocol import (
+    CharacterSummary,
+    ClearConversation,
     ClientEvent,
     ErrorEvent,
+    SelectCharacter,
+    SelectModel,
     SessionReady,
     SpeechFinished,
     UserMessage,
@@ -26,7 +30,7 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
 
     await websocket.accept()
     connections.add(websocket)
-    await connections.send(websocket, _session_ready(container))
+    await connections.send(websocket, await _session_ready(container))
 
     pending: set[asyncio.Task[None]] = set()
     try:
@@ -62,6 +66,13 @@ async def _dispatch(container: AppContainer, websocket: WebSocket, event: Client
                 await container.conversation.handle_user_message(text)
             case SpeechFinished():
                 await container.conversation.finish_speaking()
+            case SelectCharacter(character_id=character_id):
+                character = container.characters.get(character_id)
+                await container.conversation.switch_character(character)
+            case ClearConversation():
+                await container.conversation.clear_conversation()
+            case SelectModel(model=model):
+                await container.conversation.switch_model(model)
     except AppError as exc:
         await _send_error(container, websocket, ErrorEvent(code=exc.code, message=exc.message))
     except Exception:
@@ -80,11 +91,19 @@ async def _send_error(container: AppContainer, websocket: WebSocket, error: Erro
         log.debug("Could not deliver error to client")
 
 
-def _session_ready(container: AppContainer) -> SessionReady:
+async def _session_ready(container: AppContainer) -> SessionReady:
+    conversation = container.conversation
+    character = conversation.character
     return SessionReady(
-        character_name=container.character.name,
+        character_id=character.id,
+        character_name=character.name,
+        characters=[CharacterSummary(id=c.id, name=c.name) for c in container.characters.all()],
+        history=container.conversation.history(),
         ai_provider=container.provider.name,
         ai_is_remote=container.provider.is_remote,
+        ai_model=conversation.model,
+        ai_models=await conversation.available_models(),
+        ai_model_loading=conversation.model_loading,
         privacy=container.settings.privacy,
         state=container.state.phase,
     )

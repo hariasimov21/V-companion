@@ -5,7 +5,9 @@ import {
   type AppState,
   appReducer,
   initialAppState,
+  selectCanClearConversation,
   selectCanSend,
+  selectCanSwitchModel,
   selectDisplayStatus,
 } from './appState'
 
@@ -15,17 +17,31 @@ const run = (actions: AppAction[], from: AppState = initialAppState): AppState =
 const connected = run([{ type: 'connection_changed', status: 'connected' }])
 
 describe('appReducer', () => {
-  it('stores session info from session_ready', () => {
+  it('stores session info and the restored chat from session_ready', () => {
     const state = run(
       [
+        { type: 'user_message_sent', text: 'stale message from before a reconnect' },
         {
           type: 'server_event',
           event: {
             type: 'session_ready',
-            protocol_version: 1,
+            protocol_version: 4,
+            character_id: 'akari',
             character_name: 'Akari',
+            characters: [
+              { id: 'akari', name: 'Akari' },
+              { id: 'mimi', name: 'Mimi' },
+            ],
+            history: [
+              { role: 'user', text: 'hola' },
+              { role: 'assistant', text: '¡Hola!', emotion: 'happy', gesture: 'wave' },
+              { role: 'assistant', text: 'sin metadatos', emotion: null, gesture: null },
+            ],
             ai_provider: 'mock',
             ai_is_remote: false,
+            ai_model: 'gpt-oss:latest',
+            ai_models: ['gpt-oss:latest', 'qwen3:14b'],
+            ai_model_loading: false,
             privacy: { microphone_enabled: false, camera_enabled: false, remote_vision_enabled: false },
             state: 'idle',
           },
@@ -34,6 +50,117 @@ describe('appReducer', () => {
       connected,
     )
     expect(state.session?.characterName).toBe('Akari')
+    expect(state.session?.characters).toHaveLength(2)
+    expect(state.messages.map((m) => m.text)).toEqual(['hola', '¡Hola!', 'sin metadatos'])
+    expect(state.messages[1]).toMatchObject({ role: 'assistant', emotion: 'happy', gesture: 'wave' })
+    expect(state.messages[2]).toMatchObject({ emotion: 'neutral', gesture: 'none' })
+    expect(new Set(state.messages.map((m) => m.id)).size).toBe(3)
+  })
+
+  it("shows the new character's own conversation when the character changes", () => {
+    const withSession: AppState = {
+      ...connected,
+      session: {
+        characterId: 'akari',
+        characterName: 'Akari',
+        characters: [],
+        aiProvider: 'mock',
+        aiIsRemote: false,
+        aiModel: null,
+        aiModels: [],
+        modelLoading: false,
+        privacy: { microphone_enabled: false, camera_enabled: false, remote_vision_enabled: false },
+      },
+      emotion: 'happy',
+      lastError: 'old error',
+    }
+    const state = run(
+      [
+        { type: 'user_message_sent', text: 'hola' },
+        {
+          type: 'server_event',
+          event: {
+            type: 'character_changed',
+            character_id: 'mimi',
+            character_name: 'Mimi',
+            history: [{ role: 'user', text: 'miau' }],
+          },
+        },
+      ],
+      withSession,
+    )
+    expect(state.session?.characterId).toBe('mimi')
+    expect(state.session?.characterName).toBe('Mimi')
+    expect(state.messages.map((m) => m.text)).toEqual(['miau'])
+    expect(state.emotion).toBe('neutral')
+    expect(state.lastError).toBeNull()
+  })
+
+  it("empties the chat only when the active character's conversation is cleared", () => {
+    const withChat: AppState = {
+      ...run([{ type: 'user_message_sent', text: 'hola' }], connected),
+      session: {
+        characterId: 'akari',
+        characterName: 'Akari',
+        characters: [],
+        aiProvider: 'mock',
+        aiIsRemote: false,
+        aiModel: null,
+        aiModels: [],
+        modelLoading: false,
+        privacy: { microphone_enabled: false, camera_enabled: false, remote_vision_enabled: false },
+      },
+      emotion: 'happy',
+    }
+    expect(selectCanClearConversation(withChat)).toBe(true)
+
+    const other = appReducer(withChat, {
+      type: 'server_event',
+      event: { type: 'conversation_cleared', character_id: 'mimi' },
+    })
+    expect(other.messages).toHaveLength(1)
+
+    const cleared = appReducer(withChat, {
+      type: 'server_event',
+      event: { type: 'conversation_cleared', character_id: 'akari' },
+    })
+    expect(cleared.messages).toEqual([])
+    expect(cleared.emotion).toBe('neutral')
+    expect(selectCanClearConversation(cleared)).toBe(false)
+  })
+
+  it('blocks sending and shows loading while a model loads', () => {
+    const ready: AppState = {
+      ...connected,
+      session: {
+        characterId: 'akari',
+        characterName: 'Akari',
+        characters: [],
+        aiProvider: 'ollama',
+        aiIsRemote: false,
+        aiModel: 'gpt-oss:latest',
+        aiModels: ['gpt-oss:latest', 'qwen3:14b'],
+        modelLoading: false,
+        privacy: { microphone_enabled: false, camera_enabled: false, remote_vision_enabled: false },
+      },
+    }
+    expect(selectCanSwitchModel(ready)).toBe(true)
+
+    const loading = appReducer(ready, {
+      type: 'server_event',
+      event: { type: 'model_changed', model: 'qwen3:14b', loading: true },
+    })
+    expect(loading.session?.aiModel).toBe('qwen3:14b')
+    expect(selectDisplayStatus(loading)).toBe('loading')
+    expect(selectCanSend(loading)).toBe(false)
+    expect(selectCanSwitchModel(loading)).toBe(false)
+
+    const loaded = appReducer(loading, {
+      type: 'server_event',
+      event: { type: 'model_changed', model: 'qwen3:14b', loading: false },
+    })
+    expect(selectDisplayStatus(loaded)).toBe('idle')
+    expect(selectCanSend(loaded)).toBe(true)
   })
 
   it('tracks a full turn', () => {

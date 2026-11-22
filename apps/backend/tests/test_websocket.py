@@ -1,4 +1,5 @@
 from collections.abc import Iterator
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -11,8 +12,19 @@ from app.main import create_app
 
 
 @pytest.fixture
-def client(settings: Settings) -> Iterator[TestClient]:
-    with TestClient(create_app(settings, provider=MockAIProvider(latency_seconds=0))) as client:
+def app_settings(characters_dir: Path, tmp_path: Path) -> Settings:
+    # Test characters: the real characters/ folder is personal and not in git.
+    return Settings(
+        _env_file=None,
+        characters_dir=characters_dir,
+        default_character="testy",
+        memory_db=tmp_path / "memory.sqlite3",
+    )
+
+
+@pytest.fixture
+def client(app_settings: Settings) -> Iterator[TestClient]:
+    with TestClient(create_app(app_settings, provider=MockAIProvider(latency_seconds=0))) as client:
         yield client
 
 
@@ -33,6 +45,32 @@ def test_session_ready_is_sent_on_connect(client: TestClient) -> None:
     assert ready["ai_is_remote"] is False
     assert ready["privacy"]["camera_enabled"] is False
     assert ready["state"] == "idle"
+    assert ready["character_id"] == "testy"
+    assert {"id": "other", "name": "Other"} in ready["characters"]
+
+
+def test_select_character_switches_and_broadcasts(client: TestClient) -> None:
+    with client.websocket_connect("/ws") as ws:
+        receive(ws)  # session_ready
+        ws.send_json({"type": "select_character", "character_id": "other"})
+        changed = receive(ws)
+        assert changed == {
+            "type": "character_changed",
+            "character_id": "other",
+            "character_name": "Other",
+            "history": [],
+        }
+    with client.websocket_connect("/ws") as ws:
+        assert receive(ws)["character_id"] == "other"  # new connections see the switch
+
+
+def test_unknown_character_is_reported(client: TestClient) -> None:
+    with client.websocket_connect("/ws") as ws:
+        receive(ws)
+        ws.send_json({"type": "select_character", "character_id": "nobody"})
+        error = receive(ws)
+    assert error["type"] == "error"
+    assert error["code"] == "unknown_character"
 
 
 def test_full_turn(client: TestClient) -> None:
@@ -68,3 +106,44 @@ def test_ai_error_is_reported_to_client(client: TestClient) -> None:
         error = receive(ws)
         assert error["type"] == "error"
         assert error["code"] == "ai_provider_error"
+
+
+def test_conversations_and_active_character_survive_a_restart(app_settings: Settings) -> None:
+    provider = MockAIProvider(latency_seconds=0)
+    with (
+        TestClient(create_app(app_settings, provider=provider)) as client,
+        client.websocket_connect("/ws") as ws,
+    ):
+        assert receive(ws)["history"] == []
+        ws.send_json({"type": "user_message", "text": "me llamo James"})
+        while receive(ws) != {"type": "state_changed", "state": "speaking"}:
+            pass
+        ws.send_json({"type": "select_character", "character_id": "other"})
+        assert receive(ws)["type"] == "state_changed"  # speaking -> idle
+        assert receive(ws)["history"] == []
+
+    with (
+        TestClient(create_app(app_settings, provider=provider)) as client,
+        client.websocket_connect("/ws") as ws,
+    ):
+        ready = receive(ws)
+        assert ready["character_id"] == "other"  # resumes the last active character
+        assert ready["history"] == []
+        ws.send_json({"type": "select_character", "character_id": "testy"})
+        history = receive(ws)["history"]
+    assert [e["role"] for e in history] == ["user", "assistant"]
+    assert history[0]["text"] == "me llamo James"
+    assert history[1]["emotion"] is not None
+
+
+def test_clear_conversation_is_broadcast_and_persisted(client: TestClient) -> None:
+    with client.websocket_connect("/ws") as ws:
+        receive(ws)
+        ws.send_json({"type": "user_message", "text": "hola"})
+        while receive(ws) != {"type": "state_changed", "state": "speaking"}:
+            pass
+        ws.send_json({"type": "clear_conversation"})
+        assert receive(ws) == {"type": "state_changed", "state": "idle"}
+        assert receive(ws) == {"type": "conversation_cleared", "character_id": "testy"}
+    with client.websocket_connect("/ws") as ws:
+        assert receive(ws)["history"] == []

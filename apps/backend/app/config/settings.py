@@ -42,21 +42,38 @@ class Settings(BaseSettings):
     ollama_think: str = ""
     # How long Ollama keeps the model in memory after a request (avoids cold starts).
     ollama_keep_alive: str = "30m"
+    # Context window in tokens. Persona prompts are long (~6k tokens), and Ollama's
+    # default window would silently cut the beginning of the conversation.
+    ollama_num_ctx: int = Field(default=16384, ge=2048)
 
     backend_host: str = "127.0.0.1"
     backend_port: int = 8000
     log_level: str = "INFO"
 
-    character_file: Path = Path("character/character.yaml")
+    characters_dir: Path = Path("characters")
+    default_character: str = "akari"
+    # Messages of the active character's conversation sent to the model on each turn.
     short_term_memory_size: int = Field(default=30, ge=1, le=200)
+    # Save conversations to disk (one history per character) so they survive restarts.
+    memory_persist: bool = True
+    memory_db: Path = Path("data/memory.sqlite3")
+    # Long-term memory: facts about the user + summary of what left the recent window.
+    long_term_memory_enabled: bool = True
+    # Messages folded into long-term memory per update (one extra model call each time).
+    memory_batch_messages: int = Field(default=20, ge=2, le=100)
 
     privacy_microphone_enabled: bool = False
     privacy_camera_enabled: bool = False
     privacy_remote_vision_enabled: bool = False
 
     @property
-    def character_path(self) -> Path:
-        path = self.character_file
+    def characters_path(self) -> Path:
+        path = self.characters_dir
+        return path if path.is_absolute() else REPO_ROOT / path
+
+    @property
+    def memory_db_path(self) -> Path:
+        path = self.memory_db
         return path if path.is_absolute() else REPO_ROOT / path
 
     @property

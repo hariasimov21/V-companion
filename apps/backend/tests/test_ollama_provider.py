@@ -188,3 +188,81 @@ def test_factory_rejects_invalid_ollama_config(model: str, think: str) -> None:
     )
     with pytest.raises(ConfigError):
         create_ai_provider(settings)
+
+
+def fake_ollama(
+    calls: list[tuple[str, dict[str, Any]]], capabilities: dict[str, list[str]]
+) -> Handler:
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content) if request.content else {}
+        calls.append((request.url.path, body))
+        if request.url.path == "/api/tags":
+            return httpx.Response(200, json={"models": [{"name": n} for n in capabilities]})
+        if request.url.path == "/api/show":
+            if body["model"] not in capabilities:
+                return httpx.Response(404, json={"error": "model not found"})
+            family = body["model"].split(":")[0].replace("-", "")
+            return httpx.Response(
+                200,
+                json={"capabilities": capabilities[body["model"]], "details": {"family": family}},
+            )
+        if request.url.path == "/api/generate":
+            return httpx.Response(200, json={"done": True})
+        return ok_response('{"speech": "hola"}')
+
+    return handler
+
+
+CAPABILITIES = {
+    "gpt-oss:latest": ["completion", "tools", "thinking"],
+    "mistral-nemo:latest": ["completion", "tools"],
+    "qwen3:14b": ["completion", "tools", "thinking"],
+    "nomic-embed-text:latest": ["embedding"],
+}
+
+
+@pytest.mark.anyio
+async def test_lists_only_chat_models() -> None:
+    provider = make_provider(fake_ollama([], CAPABILITIES))
+    assert await provider.list_models() == ["gpt-oss:latest", "mistral-nemo:latest", "qwen3:14b"]
+
+
+@pytest.mark.anyio
+async def test_switching_model_drops_think_for_models_that_cannot_think() -> None:
+    calls: list[tuple[str, dict[str, Any]]] = []
+    provider = make_provider(fake_ollama(calls, CAPABILITIES), think="low")
+
+    await provider.chat(CONTEXT)
+    assert [b for p, b in calls if p == "/api/chat"][-1]["think"] == "low"
+
+    await provider.set_model("mistral-nemo:latest")
+    assert provider.model == "mistral-nemo:latest"
+    await provider.chat(CONTEXT)
+    body = [b for p, b in calls if p == "/api/chat"][-1]
+    assert body["model"] == "mistral-nemo:latest"
+    assert "think" not in body  # mistral-nemo would reject it
+
+
+@pytest.mark.anyio
+async def test_switching_to_a_missing_model_fails_and_keeps_the_old_one() -> None:
+    provider = make_provider(fake_ollama([], CAPABILITIES))
+    with pytest.raises(AIProviderError, match="not found"):
+        await provider.set_model("nope:latest")
+    assert provider.model == "gpt-oss:latest"
+
+
+@pytest.mark.anyio
+async def test_unload_frees_the_model() -> None:
+    calls: list[tuple[str, dict[str, Any]]] = []
+    provider = make_provider(fake_ollama(calls, CAPABILITIES))
+    await provider.unload("gpt-oss:latest")
+    assert calls == [("/api/generate", {"model": "gpt-oss:latest", "keep_alive": 0})]
+
+
+@pytest.mark.anyio
+async def test_think_level_means_no_thinking_for_models_without_levels() -> None:
+    calls: list[tuple[str, dict[str, Any]]] = []
+    provider = make_provider(fake_ollama(calls, CAPABILITIES), think="low")
+    await provider.set_model("qwen3:14b")
+    await provider.chat(CONTEXT)
+    assert [b for p, b in calls if p == "/api/chat"][-1]["think"] is False

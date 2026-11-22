@@ -1,6 +1,6 @@
 # Arquitectura
 
-Estado: **Fase 1 (MVP de chat de texto, con IA local vía Ollama)**. Este documento se actualiza cuando cambia la
+Estado: **Fase 2 en curso (avatar de sprites y varios personajes listos; Live2D pendiente)**. Este documento se actualiza cuando cambia la
 arquitectura de forma significativa.
 
 ## Vista general
@@ -14,9 +14,11 @@ flowchart LR
         Session --> Client[BackendClient<br/>WS + backoff]
         Session --> Director[AvatarDirector]
         Session --> Speech[SpeechOutput]
-        Director --> AvatarCtl[[AvatarController]]
-        AvatarCtl --> Placeholder[PlaceholderAvatar SVG]
-        AvatarCtl -.Fase 2.-> Live2D[Live2DAvatar]
+        Director --> AvatarCtl[[AvatarController<br/>ObservableAvatarController]]
+        AvatarCtl --> View{AvatarView}
+        View --> Sprite[SpriteAvatar<br/>static o layered]
+        View -->|sin sprites| Placeholder[PlaceholderAvatar SVG]
+        View -.pendiente.-> Live2D[Live2DAvatar]
     end
 
     Client <-->|WebSocket JSON tipado| WS
@@ -24,8 +26,8 @@ flowchart LR
     subgraph Backend["apps/backend (FastAPI)"]
         WS[api/websocket] --> Conv[ConversationService]
         Conv --> State[(CharacterStateStore)]
-        Conv --> Char[CharacterService]
-        Conv --> STM[ShortTermMemory]
+        Conv --> Char[CharacterRegistry<br/>CharacterService por personaje]
+        Conv --> Store[(ConversationStore<br/>SQLite, por personaje)]
         Conv --> AI[[AIProvider]]
         AI --> Mock[MockAIProvider]
         AI --> Ollama[OllamaProvider]
@@ -35,7 +37,7 @@ flowchart LR
         Conv -->|assistant_message| Conn
     end
 
-    Char --- Yaml[/character/character.yaml/]
+    Char --- Yaml[/characters/id/character.yaml + prompt.md/]
 ```
 
 Las líneas punteadas son implementaciones planificadas (stubs o fases futuras).
@@ -84,12 +86,24 @@ usuario sale de `ERROR` directamente a `THINKING`.
 | **El proveedor devuelve texto crudo; el parser valida** | Toda salida del modelo pasa por la misma validación campo a campo con valores seguros por defecto, sin importar el proveedor. |
 | **Fixtures de protocolo compartidas** (`shared/protocol-fixtures`) | Los tipos TS y Pydantic están duplicados a mano; ambos test suites validan los mismos JSON, así que cualquier divergencia rompe un test. Se evitó generar código para no añadir tooling en el MVP. |
 | **`AvatarController` + `AvatarDirector`** | El director traduce eventos del agente a comandos semánticos; el controller los traduce al motor gráfico. Live2D/VRM solo implementan `AvatarController`. |
+| **Estado del avatar separado de la vista** (`ObservableAvatarController`) | Un único estado observable (expresión, gesto, parpadeo, boca); cada renderer (sprites, SVG) solo decide cómo dibujarlo. |
+| **Sprites por capas (cuerpo + ojos + boca)** | Con imágenes alineadas, ojos y boca de imágenes distintas se combinan (p. ej. ojos tristes + boca abierta al hablar). Las capas tienen bordes difuminados que solapan en la nariz. |
+| **Assets de sprites empaquetados por Vite** (`import.meta.glob`) | Funcionan igual en desarrollo y en el build (sin `fetch` de `file://`). Si la carpeta está vacía, se usa el placeholder. |
+| **Preparación de assets offline** (`tools/avatar/`) | Quitar el fondo requiere un modelo de ML (rembg); se hace una vez al generar, no en la app. La herramienta valida que las imágenes estén alineadas. |
+| **Un personaje por carpeta** (`characters/<id>/`) | Personalidad, prompt y avatar viajan juntos; añadir un personaje es crear una carpeta. El `id` es el nombre de la carpeta y también el del set de sprites, así el frontend no necesita otra tabla. |
+| **Una conversación por personaje** | Con el historial de otro, el nuevo personaje respondería como el viejo (los modelos imitan el historial). Cada personaje lee y escribe solo la suya; `character_changed` y `session_ready` llevan su `history` para que el cliente la muestre. Cambiar se rechaza (`busy`) mientras hay un turno en curso. |
+| **`prompt.md` + contexto de la app al final** | Las personalidades escritas a mano mencionan cámara, micrófono y acciones entre asteriscos. Una sección final "CURRENT APP CONTEXT" dice qué existe hoy, sin editar el texto del personaje. |
+| **`OLLAMA_NUM_CTX=16384`** | Los prompts de personalidad ocupan ~5k tokens; con la ventana por defecto de Ollama, el inicio de la conversación se cortaría sin avisar. Se envía igual en la precarga y en cada mensaje, para que Ollama no recargue el modelo. |
+| **Sprites static y layered** | Un personaje puede tener una sola imagen mientras se generan sus variantes de cara; pasar a layered es solo regenerar assets. |
 | **Composition root** (`app/container.py`) | Único lugar donde se instancian servicios concretos; facilita tests y cambiar implementaciones. |
 | **Turnos como tareas asyncio** | El socket sigue leyendo mientras la IA piensa (permite responder `busy` y, a futuro, interrupciones). |
-| **SQLite/Postgres todavía no** | Fase 1 solo usa memoria de corto plazo en RAM; la capa `MemoryRepository` llega en Fase 5. |
+| **Memoria a largo plazo por consolidación** | `MemoryConsolidator` (`app/memory/long_term.py`) pide al mismo modelo, con esquema JSON, una lista de hechos sobre el usuario y un resumen, fusionando la memoria anterior con los mensajes que están por salir de la ventana (se consolidan *antes* de salir, así nada queda en un hueco). Corre como tarea en segundo plano tras el turno; si falla solo se registra. Se guarda en la tabla `long_term_memory` con `covered_until` (último id consolidado) y va al final del prompt de sistema para no romper la caché del prefijo. Una respuesta con `facts: []` no borra la memoria. Olvidar la conversación invalida una consolidación en curso (contador de generación). Sin embeddings: con decenas de hechos no hace falta búsqueda. |
+| **Recordatorio de personaje dentro del último mensaje** | El prompt de personalidad (~4.700 tokens) queda lejos de la respuesta y gpt-oss acababa sonando a asistente genérico y muy breve. `CharacterService.build_reminder()` se añade entre corchetes al final del último mensaje del usuario en cada turno (no se guarda). No va como mensaje `system`: las plantillas de Ollama mueven los `system` al inicio (gpt-oss, qwen3) o, en mistral-nemo, los descartan si el último mensaje no es del usuario — con eso mistral-nemo perdía la personalidad entera. Con él las respuestas pasaron de 9–25 a 35–65 palabras sin coste de latencia. Longitud configurable con `reply_length`. |
+| **Modelo global, solo local, elegido en la app** | `select_model` solo acepta modelos de `/api/tags` con capacidad `completion` (y un patrón de nombre). Al cambiar: espera la consolidación de memoria en curso, descarga el modelo anterior (`keep_alive: 0`, dos no caben en 16 GB), precarga el nuevo y bloquea turnos (`busy`) mientras carga. La elección se guarda en `app_state.ai_model` y se restaura al arrancar si sigue instalado. `think` se envía solo a modelos con capacidad `thinking`, y los niveles (`low`…) solo a gpt-oss: qwen3 los trata como razonamiento completo (53 s frente a 0,7 s). |
+| **Historial en SQLite** | `SqliteConversationStore` (`data/memory.sqlite3`) guarda todos los mensajes por personaje y el último personaje activo; al modelo solo van los últimos `SHORT_TERM_MEMORY_SIZE`. Las respuestas se guardan como el JSON completo (el historial en texto plano hacía que gpt-oss respondiera vacío). Sin hilos: las consultas son mínimas y locales. Memoria a largo plazo y Postgres/pgvector siguen pendientes (Fase 5). |
 | **Sin `docker-compose` aún** | No hay servicios externos que orquestar hasta Fase 5 (Postgres/pgvector). |
 
-## Protocolo WebSocket (v1)
+## Protocolo WebSocket (v4)
 
 Definido en `apps/backend/app/models/protocol.py` y `apps/desktop/src/renderer/src/protocol/types.ts`.
 
@@ -99,15 +113,23 @@ Definido en `apps/backend/app/models/protocol.py` y `apps/desktop/src/renderer/s
 |---|---|---|
 | `user_message` | `text` (1–4000) | Mensaje de chat. |
 | `speech_finished` | — | El cliente terminó de presentar la respuesta. |
+| `select_character` | `character_id` (`^[a-z0-9][a-z0-9_-]{0,63}$`) | Cambia de personaje y retoma su conversación. |
+| `select_model` | `model` (instalado en Ollama) | Cambia el modelo para todos los personajes; se recuerda. `busy` si hay un turno o una carga en curso. |
+| `clear_conversation` | — | Olvida la conversación y la memoria a largo plazo del personaje activo (también en disco). `busy` si hay un turno en curso. |
 
 **Servidor → cliente**
 
 | type | campos |
 |---|---|
-| `session_ready` | `protocol_version`, `character_name`, `ai_provider`, `ai_is_remote`, `privacy`, `state` |
+| `session_ready` | `protocol_version`, `character_id`, `character_name`, `characters` (`[{id, name}]`), `history`, `ai_provider`, `ai_is_remote`, `ai_model`, `ai_models`, `ai_model_loading`, `privacy`, `state` |
+| `character_changed` | `character_id`, `character_name`, `history` (a todos los clientes) |
+| `conversation_cleared` | `character_id` (a todos los clientes; vacían el chat) |
+| `model_changed` | `model`, `loading` (primero `true` mientras carga, luego `false`) |
 | `state_changed` | `state`: `idle \| listening \| thinking \| speaking \| error` |
 | `assistant_message` | `text`, `emotion`, `emotion_intensity` (0–1), `gesture`, `look_at_user` |
-| `error` | `code`: `ai_provider_error \| ai_timeout \| invalid_message \| busy \| internal_error`, `message` |
+| `error` | `code`: `ai_provider_error \| ai_timeout \| invalid_message \| busy \| unknown_character \| unknown_model \| internal_error`, `message` |
+
+`history` es una lista de `{role: user|assistant, text, emotion?, gesture?}` (los últimos 100 mensajes del personaje).
 
 Mensajes que no cumplen el esquema se rechazan en ambos extremos (el backend responde
 `invalid_message`; el frontend los ignora). No existe ningún mensaje que ejecute comandos.
@@ -125,8 +147,8 @@ Mensajes que no cumplen el esquema se rechazan en ambos extremos (el backend res
 
 | Fase | Dónde se conecta |
 |---|---|
-| 2 Live2D | Nueva implementación de `AvatarController` en `src/renderer/src/avatar/live2d/` + tabla emoción→expresión por modelo. `AvatarDirector` no cambia. |
+| 2 Live2D | Nueva vista en `src/renderer/src/avatar/live2d/` que lea `ObservableAvatarController` + tabla emoción→expresión por modelo; se elige en `AvatarView`. `AvatarDirector` no cambia. |
 | 3 Audio | `SpeechOutput` con TTS + `LipSyncController` → `setMouthOpen`. Captura de mic + VAD; fase `listening` ya existe en la máquina de estados. |
 | 4 Cámara | `analyze_image` ya está en `AIProvider`. Nuevo `VisionService` en backend. |
-| 5 Memoria | `MemoryService` + `MemoryRepository` sustituyen/extienden `ShortTermMemory`. |
+| 5 Memoria | Historial por personaje y memoria a largo plazo (hechos + resumen) hechos; faltan embeddings/recuperación semántica si la memoria crece mucho. |
 | 6 Eventos | `EventBus` + `BehaviorService`; `CharacterState` ya tiene `is_user_present` y `last_interaction_at`. |

@@ -34,3 +34,17 @@ def character_file(tmp_path: Path) -> Path:
         encoding="utf-8",
     )
     return path
+
+
+@pytest.fixture
+def characters_dir(tmp_path: Path) -> Path:
+    """Two characters: one with generated persona, one with a prompt file."""
+    root = tmp_path / "characters"
+    (root / "testy").mkdir(parents=True)
+    (root / "testy" / "character.yaml").write_text("character:\n  name: Testy\n", encoding="utf-8")
+    (root / "other").mkdir()
+    (root / "other" / "character.yaml").write_text(
+        "character:\n  name: Other\n  prompt_file: prompt.md\n", encoding="utf-8"
+    )
+    (root / "other" / "prompt.md").write_text("# OTHER\nEres Other.\n", encoding="utf-8")
+    return root

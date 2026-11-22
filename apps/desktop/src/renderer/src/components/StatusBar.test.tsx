@@ -22,9 +22,14 @@ describe('StatusBar', () => {
           connection: 'connected',
           phase: 'thinking',
           session: {
+            characterId: 'akari',
             characterName: 'Akari',
+            characters: [],
             aiProvider: 'openai',
             aiIsRemote: true,
+            aiModel: null,
+            aiModels: [],
+            modelLoading: false,
             privacy: { microphone_enabled: false, camera_enabled: false, remote_vision_enabled: false },
           },
         }}

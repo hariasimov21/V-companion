@@ -3,6 +3,8 @@ import {
   EMOTIONS,
   ERROR_CODES,
   GESTURES,
+  type CharacterSummary,
+  type HistoryEntry,
   type PrivacySettings,
   type ServerEvent,
 } from './types'
@@ -34,14 +36,44 @@ const isPrivacy = (value: unknown): value is PrivacySettings =>
   isBoolean(value['camera_enabled']) &&
   isBoolean(value['remote_vision_enabled'])
 
+const isCharacterSummary = (value: unknown): value is CharacterSummary =>
+  isObject(value) && isString(value['id']) && isString(value['name'])
+
+const isOptional =
+  <T>(check: (value: unknown) => value is T) =>
+  (value: unknown): value is T | null | undefined =>
+    value === undefined || value === null || check(value)
+
+const isHistoryEntry = (value: unknown): value is HistoryEntry =>
+  isObject(value) &&
+  (value['role'] === 'user' || value['role'] === 'assistant') &&
+  isString(value['text']) &&
+  isOptional(isEmotion)(value['emotion']) &&
+  isOptional(isGesture)(value['gesture'])
+
+const isHistory = (value: unknown): value is HistoryEntry[] =>
+  Array.isArray(value) && value.every(isHistoryEntry)
+
 const validators: Record<ServerEvent['type'], (data: JsonObject) => boolean> = {
   session_ready: (d) =>
     typeof d['protocol_version'] === 'number' &&
+    isString(d['character_id']) &&
     isString(d['character_name']) &&
+    Array.isArray(d['characters']) &&
+    d['characters'].every(isCharacterSummary) &&
+    isHistory(d['history']) &&
     isString(d['ai_provider']) &&
     isBoolean(d['ai_is_remote']) &&
+    (d['ai_model'] === null || isString(d['ai_model'])) &&
+    Array.isArray(d['ai_models']) &&
+    d['ai_models'].every(isString) &&
+    isBoolean(d['ai_model_loading']) &&
     isPrivacy(d['privacy']) &&
     isPhase(d['state']),
+  character_changed: (d) =>
+    isString(d['character_id']) && isString(d['character_name']) && isHistory(d['history']),
+  conversation_cleared: (d) => isString(d['character_id']),
+  model_changed: (d) => isString(d['model']) && isBoolean(d['loading']),
   state_changed: (d) => isPhase(d['state']),
   assistant_message: (d) =>
     isString(d['text']) &&

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useReducer, useRef, useState } from 'react'
 
 import { AvatarDirector } from '../avatar/AvatarDirector'
-import { PlaceholderAvatarController } from '../avatar/placeholder/PlaceholderAvatarController'
+import { ObservableAvatarController } from '../avatar/ObservableAvatarController'
 import { appConfig } from '../config/appConfig'
 import type { ServerEvent } from '../protocol/types'
 import { TextOnlySpeechOutput } from '../speech/SpeechOutput'
@@ -10,8 +10,11 @@ import { BackendClient } from '../websocket/BackendClient'
 
 interface CompanionSession {
   state: AppState
-  avatar: PlaceholderAvatarController
+  avatar: ObservableAvatarController
   sendUserMessage: (text: string) => boolean
+  selectCharacter: (characterId: string) => boolean
+  clearConversation: () => boolean
+  selectModel: (model: string) => boolean
 }
 
 /**
@@ -20,7 +23,7 @@ interface CompanionSession {
  */
 export function useCompanionSession(): CompanionSession {
   const [state, dispatch] = useReducer(appReducer, initialAppState)
-  const [avatar] = useState(() => new PlaceholderAvatarController())
+  const [avatar] = useState(() => new ObservableAvatarController())
   const [client] = useState(
     () => new BackendClient(appConfig.backendWsUrl, appConfig.reconnect),
   )
@@ -49,6 +52,9 @@ export function useCompanionSession(): CompanionSession {
       dispatch({ type: 'server_event', event })
       if (event.type === 'state_changed' || event.type === 'session_ready') {
         director.onPhaseChanged(event.state)
+      } else if (event.type === 'character_changed' || event.type === 'conversation_cleared') {
+        stopSpeech() // A line from the previous conversation must not keep "playing".
+        director.reset()
       } else if (event.type === 'assistant_message') {
         director.onAssistantMessage(event)
         speak(event.text)
@@ -85,5 +91,20 @@ export function useCompanionSession(): CompanionSession {
     [client],
   )
 
-  return { state, avatar, sendUserMessage }
+  const selectCharacter = useCallback(
+    (characterId: string) => client.send({ type: 'select_character', character_id: characterId }),
+    [client],
+  )
+
+  const clearConversation = useCallback(
+    () => client.send({ type: 'clear_conversation' }),
+    [client],
+  )
+
+  const selectModel = useCallback(
+    (model: string) => client.send({ type: 'select_model', model }),
+    [client],
+  )
+
+  return { state, avatar, sendUserMessage, selectCharacter, clearConversation, selectModel }
 }

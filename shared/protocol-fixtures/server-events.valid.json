@@ -1,10 +1,20 @@
 [
   {
     "type": "session_ready",
-    "protocol_version": 1,
+    "protocol_version": 4,
+    "character_id": "akari",
     "character_name": "Akari",
-    "ai_provider": "mock",
+    "characters": [{ "id": "akari", "name": "Akari" }, { "id": "mimi", "name": "Mimi" }],
+    "history": [
+      { "role": "user", "text": "hola" },
+      { "role": "assistant", "text": "¡Hola!", "emotion": "happy", "gesture": "wave" },
+      { "role": "assistant", "text": "Respuesta antigua sin metadatos", "emotion": null, "gesture": null }
+    ],
+    "ai_provider": "ollama",
     "ai_is_remote": false,
+    "ai_model": "gpt-oss:latest",
+    "ai_models": ["gpt-oss:latest", "mistral-nemo:latest", "qwen3:14b"],
+    "ai_model_loading": false,
     "privacy": { "microphone_enabled": false, "camera_enabled": false, "remote_vision_enabled": false },
     "state": "idle"
   },
@@ -17,5 +27,8 @@
     "gesture": "nod",
     "look_at_user": true
   },
-  { "type": "error", "code": "ai_timeout", "message": "The AI took too long to answer" }
+  { "type": "error", "code": "ai_timeout", "message": "The AI took too long to answer" },
+  { "type": "character_changed", "character_id": "mimi", "character_name": "Mimi", "history": [] },
+  { "type": "conversation_cleared", "character_id": "mimi" },
+  { "type": "model_changed", "model": "mistral-nemo:latest", "loading": true }
 ]

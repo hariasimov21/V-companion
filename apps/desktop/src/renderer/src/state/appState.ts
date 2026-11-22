@@ -1,16 +1,24 @@
 import type {
   AssistantPhase,
+  CharacterSummary,
   Emotion,
   Gesture,
+  HistoryEntry,
   PrivacySettings,
   ServerEvent,
 } from '../protocol/types'
 import type { ConnectionStatus } from '../websocket/BackendClient'
 
 export interface SessionInfo {
+  characterId: string
   characterName: string
+  characters: CharacterSummary[]
   aiProvider: string
   aiIsRemote: boolean
+  aiModel: string | null
+  aiModels: string[]
+  /** A newly selected model is loading into memory: nothing can be sent meanwhile. */
+  modelLoading: boolean
   privacy: PrivacySettings
 }
 
@@ -58,18 +66,71 @@ function appendMessage(state: AppState, entry: NewChatEntry): AppState {
   }
 }
 
+/** Replaces the chat with a conversation restored by the backend (its source of truth). */
+function withHistory(state: AppState, history: HistoryEntry[]): AppState {
+  const messages = history.slice(-MAX_MESSAGES).map(
+    (entry, index): ChatEntry =>
+      entry.role === 'user'
+        ? { id: state.nextId + index, role: 'user', text: entry.text }
+        : {
+            id: state.nextId + index,
+            role: 'assistant',
+            text: entry.text,
+            emotion: entry.emotion ?? 'neutral',
+            gesture: entry.gesture ?? 'none',
+          },
+  )
+  return { ...state, messages, nextId: state.nextId + messages.length }
+}
+
 function reduceServerEvent(state: AppState, event: ServerEvent): AppState {
   switch (event.type) {
     case 'session_ready':
+      return withHistory(
+        {
+          ...state,
+          phase: event.state,
+          session: {
+            characterId: event.character_id,
+            characterName: event.character_name,
+            characters: event.characters,
+            aiProvider: event.ai_provider,
+            aiIsRemote: event.ai_is_remote,
+            aiModel: event.ai_model,
+            aiModels: event.ai_models,
+            modelLoading: event.ai_model_loading,
+            privacy: event.privacy,
+          },
+        },
+        event.history,
+      )
+    case 'character_changed':
+      // Each character has its own conversation: show the one the backend restored.
+      return withHistory(
+        {
+          ...state,
+          session: state.session && {
+            ...state.session,
+            characterId: event.character_id,
+            characterName: event.character_name,
+          },
+          emotion: 'neutral',
+          lastError: null,
+        },
+        event.history,
+      )
+    case 'conversation_cleared':
+      if (state.session?.characterId !== event.character_id) return state
+      return { ...state, messages: [], emotion: 'neutral', lastError: null }
+    case 'model_changed':
       return {
         ...state,
-        phase: event.state,
-        session: {
-          characterName: event.character_name,
-          aiProvider: event.ai_provider,
-          aiIsRemote: event.ai_is_remote,
-          privacy: event.privacy,
+        session: state.session && {
+          ...state.session,
+          aiModel: event.model,
+          modelLoading: event.loading,
         },
+        lastError: null,
       }
     case 'state_changed':
       return { ...state, phase: event.state }
@@ -94,13 +155,33 @@ export function appReducer(state: AppState, action: AppAction): AppState {
   }
 }
 
-export type DisplayStatus = AssistantPhase | 'offline'
+export type DisplayStatus = AssistantPhase | 'offline' | 'loading'
 
-/** What the UI should show: connection problems take precedence over the phase. */
+/** What the UI should show: connection problems first, then a model load, then the phase. */
 export function selectDisplayStatus(state: AppState): DisplayStatus {
-  return state.connection === 'connected' ? state.phase : 'offline'
+  if (state.connection !== 'connected') return 'offline'
+  return state.session?.modelLoading ? 'loading' : state.phase
+}
+
+/** Connected, not thinking and no model loading: the backend would answer "busy" otherwise. */
+function isReady(state: AppState): boolean {
+  return state.connection === 'connected' && state.phase !== 'thinking' && !state.session?.modelLoading
 }
 
 export function selectCanSend(state: AppState): boolean {
-  return state.connection === 'connected' && state.phase !== 'thinking'
+  return isReady(state)
+}
+
+export function selectCanSwitchModel(state: AppState): boolean {
+  return isReady(state) && (state.session?.aiModels.length ?? 0) > 0
+}
+
+/** Clearing mid-answer would be rejected as busy by the backend. */
+export function selectCanClearConversation(state: AppState): boolean {
+  return isReady(state) && state.messages.length > 0
+}
+
+/** Switching mid-answer would be rejected as busy by the backend. */
+export function selectCanSwitchCharacter(state: AppState): boolean {
+  return isReady(state)
 }

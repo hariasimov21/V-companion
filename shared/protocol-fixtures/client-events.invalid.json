@@ -1,5 +1,12 @@
 [
   { "type": "user_message", "text": "" },
   { "type": "user_message" },
-  { "type": "execute_command", "command": "rm -rf /" }
+  { "type": "execute_command", "command": "rm -rf /" },
+  { "type": "select_character" },
+  { "type": "select_character", "character_id": "../../etc" },
+  { "type": "select_character", "character_id": "Mimi" },
+  { "type": "select_model" },
+  { "type": "select_model", "model": "" },
+  { "type": "select_model", "model": "gpt-oss; rm -rf /" },
+  { "type": "select_model", "model": "../../etc/passwd" }
 ]

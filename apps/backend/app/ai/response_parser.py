@@ -19,7 +19,7 @@ DEFAULT_INTENSITY = 0.5
 
 
 def parse_assistant_reply(raw: str) -> AssistantReply:
-    data = _extract_json_object(raw)
+    data = extract_json_object(raw)
     if data is None:
         text = raw.strip()
         if text:
@@ -35,7 +35,7 @@ def parse_assistant_reply(raw: str) -> AssistantReply:
     )
 
 
-def _extract_json_object(raw: str) -> dict[str, Any] | None:
+def extract_json_object(raw: str) -> dict[str, Any] | None:
     start, end = raw.find("{"), raw.rfind("}")
     if start == -1 or end <= start:
         return None

@@ -39,9 +39,11 @@ class MockAIProvider(AIProvider):
 
     async def chat(self, context: ChatContext) -> str:
         await asyncio.sleep(self._latency_seconds)
-        last_user_text = next(
-            (m.content.lower() for m in reversed(context.messages) if m.role == "user"), ""
+        last_user_content = next(
+            (m.content for m in reversed(context.messages) if m.role == "user"), ""
         )
+        # Ignore the app's bracketed per-turn instructions: react to what the user typed.
+        last_user_text = last_user_content.split("\n\n[", 1)[0].lower()
         if last_user_text.strip() == ERROR_TRIGGER:
             raise AIProviderError("Simulated AI failure (mock provider)")
         return json.dumps(self._reply_for(last_user_text), ensure_ascii=False)

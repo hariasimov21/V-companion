@@ -15,6 +15,7 @@ __pycache__/
 # Node / Electron
 node_modules/
 out/
+*.tsbuildinfo
 dist/
 *.log
 
@@ -25,3 +26,11 @@ data/
 # Editors / OS
 .DS_Store
 .idea/
+
+# Personal avatar assets (character art; may contain third-party IP)
+vapie/
+characters1img/
+# Characters are personal (persona prompts + art): keep them out of the public repo.
+characters/
+apps/desktop/src/renderer/src/avatar/sprite/assets/
+*:Zone.Identifier

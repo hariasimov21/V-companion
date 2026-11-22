@@ -1,4 +1,10 @@
-import { type AppState, type DisplayStatus, selectDisplayStatus } from '../state/appState'
+import {
+  type AppState,
+  type DisplayStatus,
+  selectCanSwitchModel,
+  selectDisplayStatus,
+} from '../state/appState'
+import { ModelPicker } from './ModelPicker'
 
 const STATUS_LABELS: Record<DisplayStatus, string> = {
   idle: 'Idle',
@@ -7,6 +13,7 @@ const STATUS_LABELS: Record<DisplayStatus, string> = {
   speaking: 'Speaking',
   error: 'Error',
   offline: 'Offline',
+  loading: 'Cargando modelo…',
 }
 
 function Indicator({ label, active, title }: { label: string; active: boolean; title: string }) {
@@ -17,7 +24,12 @@ function Indicator({ label, active, title }: { label: string; active: boolean; t
   )
 }
 
-export function StatusBar({ state }: { state: AppState }) {
+interface StatusBarProps {
+  state: AppState
+  onSelectModel?: (model: string) => void
+}
+
+export function StatusBar({ state, onSelectModel = () => undefined }: StatusBarProps) {
   const status = selectDisplayStatus(state)
   const { session } = state
 
@@ -35,6 +47,14 @@ export function StatusBar({ state }: { state: AppState }) {
         </span>
       </div>
       <div className="status-bar__group">
+        {session && session.aiModels.length > 0 && session.aiModel && (
+          <ModelPicker
+            models={session.aiModels}
+            currentModel={session.aiModel}
+            disabled={!selectCanSwitchModel(state)}
+            onSelect={onSelectModel}
+          />
+        )}
         {session && (
           <span
             className={`indicator ${session.aiIsRemote ? 'indicator--remote' : 'indicator--off'}`}

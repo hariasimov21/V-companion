@@ -71,6 +71,32 @@ body {
 .status-badge--speaking { background: #3a3220; color: var(--warn); }
 .status-badge--error { background: #3d1f24; color: var(--danger); }
 .status-badge--offline { background: #2a2a2e; color: var(--muted); }
+.status-badge--loading { background: #33284a; color: var(--accent); }
+
+.model-picker {
+  padding: 2px 6px;
+  font: inherit;
+  font-size: 12px;
+  color: var(--text);
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.model-picker:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+
+.model-picker:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.model-picker:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
 
 .indicator {
   padding: 3px 8px;
@@ -97,6 +123,99 @@ body {
   align-items: center;
   justify-content: center;
   padding: 24px;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.character-picker {
+  margin: 8px 0 0;
+  padding: 4px 28px 4px 12px;
+  font: inherit;
+  font-size: 20px;
+  letter-spacing: 0.04em;
+  color: var(--text);
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.character-picker:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+
+.character-picker:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.character-picker:disabled {
+  cursor: default;
+  opacity: 0.7;
+}
+
+.forget-conversation {
+  margin: 8px 0 0;
+  padding: 4px 10px;
+  font: inherit;
+  font-size: 12px;
+  color: var(--muted);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.forget-conversation:hover:not(:disabled) {
+  color: var(--danger);
+  border-color: var(--panel-border);
+}
+
+.forget-conversation:focus-visible,
+.forget-conversation__confirm button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.forget-conversation:disabled {
+  cursor: default;
+  opacity: 0.4;
+}
+
+.forget-conversation__confirm {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  max-width: 320px;
+  margin: 8px 0 0;
+  padding: 10px 12px;
+  font-size: 13px;
+  text-align: center;
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+  border-radius: 8px;
+}
+
+.forget-conversation__actions {
+  display: flex;
+  gap: 8px;
+}
+
+.forget-conversation__actions button {
+  padding: 4px 12px;
+  font: inherit;
+  color: var(--text);
+  background: transparent;
+  border: 1px solid var(--panel-border);
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.forget-conversation__actions .forget-conversation__yes {
+  color: #fff;
+  background: var(--danger);
+  border-color: var(--danger);
 }
 
 .avatar-stage__name {
@@ -269,6 +388,67 @@ body {
 @keyframes stretch { 0%, 100% { transform: scale(1); } 40%, 60% { transform: scale(0.96, 1.06) translateY(-6px); } }
 @keyframes wave { 0%, 100% { transform: rotate(0); } 20%, 60% { transform: rotate(20deg); } 40%, 80% { transform: rotate(-10deg); } }
 
+/* --- Sprite avatar ---------------------------------------------------------- */
+
+.sprite-avatar {
+  position: relative;
+  height: calc(100% - 40px);
+  max-width: 100%;
+}
+
+.sprite-avatar__motion,
+.sprite-avatar__breath,
+.sprite-avatar__body {
+  position: absolute;
+  inset: 0;
+  transform-origin: 50% 100%;
+}
+
+.sprite-avatar__breath {
+  animation: sprite-breathe 4s ease-in-out infinite;
+  filter: drop-shadow(0 12px 24px rgb(0 0 0 / 0.35));
+}
+
+.sprite-avatar__region {
+  position: absolute;
+}
+
+.sprite-avatar__layer {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  user-select: none;
+  transition: opacity 140ms ease;
+}
+
+.sprite-avatar__layer--instant {
+  transition: none;
+}
+
+/* Irregular open/close rhythm so fake talking does not look mechanical. */
+.sprite-avatar__talking {
+  animation: sprite-talk 1.3s step-end infinite;
+}
+
+@keyframes sprite-breathe { 0%, 100% { transform: scaleY(1); } 50% { transform: scaleY(1.006); } }
+/* Static sprites (no mouth layer): a small bob signals speech. */
+.sprite-avatar__body--talking {
+  animation: sprite-bob 0.9s ease-in-out infinite;
+}
+
+@keyframes sprite-bob {
+  0%, 100% { transform: translateY(0) scaleY(1); }
+  30% { transform: translateY(-0.6%) scaleY(1.004); }
+  60% { transform: translateY(0.2%) scaleY(0.998); }
+}
+
+@keyframes sprite-talk {
+  0% { opacity: 1; } 11% { opacity: 0; } 20% { opacity: 1; } 35% { opacity: 0; }
+  43% { opacity: 1; } 58% { opacity: 0; } 70% { opacity: 1; } 84% { opacity: 0; }
+}
+
 @media (max-width: 760px) {
   .app__body {
     grid-template-columns: 1fr;
@@ -281,5 +461,5 @@ body {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .head, .wave-hand, .mouth--talking { animation: none !important; }
+  .head, .wave-hand, .mouth--talking, .sprite-avatar__breath, .sprite-avatar__body--talking { animation: none !important; }
 }

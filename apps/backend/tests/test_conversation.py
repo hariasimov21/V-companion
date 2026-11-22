@@ -4,17 +4,18 @@ from pathlib import Path
 import pytest
 from pydantic import BaseModel
 
-from app.ai.base import AIProvider, ChatContext, ImageInput
+from app.ai.base import AIProvider, ChatContext, ChatMessage, ImageInput
 from app.ai.providers.mock import MockAIProvider
 from app.character.config import load_character_config
+from app.character.registry import Character
 from app.character.service import CharacterService
 from app.character.state import CharacterStateStore
 from app.conversation.service import ConversationService
 from app.core.errors import AIProviderError, AITimeoutError, BusyError
-from app.memory.short_term import ShortTermMemory
+from app.memory.store import InMemoryConversationStore
 from app.models.assistant import AssistantReply
 from app.models.avatar import Emotion
-from app.models.protocol import AssistantMessage
+from app.models.protocol import AssistantMessage, CharacterChanged, ConversationCleared
 from app.models.state import AssistantPhase
 
 
@@ -50,19 +51,20 @@ def current_phase(state: CharacterStateStore) -> AssistantPhase:
 
 def make_service(
     provider: AIProvider, character_file: Path, timeout: float = 5.0
-) -> tuple[ConversationService, CharacterStateStore, RecordingPublisher, ShortTermMemory]:
+) -> tuple[ConversationService, CharacterStateStore, RecordingPublisher, InMemoryConversationStore]:
     state = CharacterStateStore()
     publisher = RecordingPublisher()
-    memory = ShortTermMemory(10)
+    store = InMemoryConversationStore()
     service = ConversationService(
         provider=provider,
-        character=CharacterService(load_character_config(character_file)),
-        memory=memory,
+        character=Character("testy", CharacterService(load_character_config(character_file))),
+        store=store,
         state=state,
         publisher=publisher,
         timeout_seconds=timeout,
+        context_messages=10,
     )
-    return service, state, publisher, memory
+    return service, state, publisher, store
 
 
 @pytest.mark.anyio
@@ -76,7 +78,7 @@ async def test_turn_publishes_reply_and_ends_speaking(character_file: Path) -> N
     assert state.phase is AssistantPhase.SPEAKING
     assert state.state.emotion is Emotion.HAPPY
     assert isinstance(publisher.events[0], AssistantMessage)
-    history = memory.get_recent_context()
+    history = memory.recent("testy", 10)
     assert [m.role for m in history] == ["user", "assistant"]
     assert AssistantReply.model_validate_json(history[1].content) == reply
 
@@ -93,7 +95,7 @@ async def test_provider_error_moves_to_error_state(character_file: Path) -> None
 
     assert state.phase is AssistantPhase.ERROR
     assert publisher.events == []
-    assert memory.get_recent_context() == []
+    assert memory.recent("testy", 10) == []
 
 
 @pytest.mark.anyio
@@ -128,3 +130,96 @@ async def test_concurrent_message_is_rejected_as_busy(character_file: Path) -> N
     with pytest.raises(BusyError):
         await service.handle_user_message("dos")
     await first
+
+
+@pytest.mark.anyio
+async def test_each_character_keeps_its_own_conversation(character_file: Path) -> None:
+    service, state, publisher, memory = make_service(MockAIProvider(0), character_file)
+    testy = service.character
+    await service.handle_user_message("hola")
+    other = Character("other", testy.service)
+
+    await service.switch_character(other)
+
+    assert service.character.id == "other"
+    assert memory.get_active_character() == "other"
+    assert current_phase(state) is AssistantPhase.IDLE
+    changed = publisher.events[-1]
+    assert isinstance(changed, CharacterChanged)
+    assert changed.character_id == "other"
+    assert changed.history == []  # never sees testy's conversation
+
+    await service.handle_user_message("¿quién eres?")
+    assert memory.recent("other", 10)[0].content == "¿quién eres?"
+
+    await service.switch_character(testy)
+    changed = publisher.events[-1]
+    assert isinstance(changed, CharacterChanged)
+    assert [e.role for e in changed.history] == ["user", "assistant"]
+    assert changed.history[0].text == "hola"
+    assert changed.history[1].text  # the reply's speech, not its raw JSON
+    assert not changed.history[1].text.startswith("{")
+    assert changed.history[1].emotion is not None
+
+
+@pytest.mark.anyio
+async def test_context_sent_to_model_is_limited_to_the_window(character_file: Path) -> None:
+    seen: list[ChatContext] = []
+
+    class SpyProvider(MockAIProvider):
+        async def chat(self, context: ChatContext) -> str:
+            seen.append(context)
+            return await super().chat(context)
+
+    service, _, _, memory = make_service(SpyProvider(0), character_file)
+    for i in range(8):
+        await service.handle_user_message(f"mensaje {i}")
+        await service.finish_speaking()
+
+    last = seen[-1].messages
+    assert len(last) == 11  # 10 remembered messages + the new one
+    # The reminder rides inside the latest user message, which comes last.
+    assert last[-1].role == "user"
+    assert last[-1].content.startswith("mensaje 7\n\n[Instructions for your reply")
+    assert "Testy" in last[-1].content
+    # It is re-sent each turn, never stored in the conversation.
+    assert all("Instructions for your reply" not in m.content for m in memory.recent("testy", 100))
+    assert len(service.history()) == 16
+
+
+@pytest.mark.anyio
+async def test_switching_character_while_thinking_is_busy(character_file: Path) -> None:
+    service, _, _, _ = make_service(MockAIProvider(0.2), character_file)
+    turn = asyncio.create_task(service.handle_user_message("uno"))
+    await asyncio.sleep(0.01)
+    with pytest.raises(BusyError):
+        await service.switch_character(Character("other", service.character.service))
+    await turn
+
+
+@pytest.mark.anyio
+async def test_clear_conversation_forgets_only_the_active_character(character_file: Path) -> None:
+    service, state, publisher, memory = make_service(MockAIProvider(0), character_file)
+    memory.add("other", [ChatMessage(role="user", content="no me borres")])
+    await service.handle_user_message("hola")
+    assert state.phase is AssistantPhase.SPEAKING
+
+    await service.clear_conversation()
+
+    assert memory.recent("testy", 10) == []
+    assert service.history() == []
+    assert [m.content for m in memory.recent("other", 10)] == ["no me borres"]
+    assert current_phase(state) is AssistantPhase.IDLE
+    assert state.state.emotion is Emotion.NEUTRAL
+    assert publisher.events[-1] == ConversationCleared(character_id="testy")
+
+
+@pytest.mark.anyio
+async def test_clear_conversation_while_thinking_is_busy(character_file: Path) -> None:
+    service, _, _, memory = make_service(MockAIProvider(0.2), character_file)
+    turn = asyncio.create_task(service.handle_user_message("uno"))
+    await asyncio.sleep(0.01)
+    with pytest.raises(BusyError):
+        await service.clear_conversation()
+    await turn
+    assert len(memory.recent("testy", 10)) == 2

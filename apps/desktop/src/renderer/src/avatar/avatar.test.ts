@@ -4,8 +4,8 @@ import type { AvatarController } from './AvatarController'
 import { AvatarDirector } from './AvatarDirector'
 import {
   MOTION_DURATION_MS,
-  PlaceholderAvatarController,
-} from './placeholder/PlaceholderAvatarController'
+  ObservableAvatarController,
+} from './ObservableAvatarController'
 
 function fakeController() {
   return {
@@ -61,12 +61,12 @@ describe('AvatarDirector', () => {
   })
 })
 
-describe('PlaceholderAvatarController', () => {
+describe('ObservableAvatarController', () => {
   beforeEach(() => vi.useFakeTimers())
   afterEach(() => vi.useRealTimers())
 
   it('notifies subscribers on changes', async () => {
-    const controller = new PlaceholderAvatarController()
+    const controller = new ObservableAvatarController()
     const listener = vi.fn()
     controller.subscribe(listener)
     await controller.setExpression({ emotion: 'sad', intensity: 3 })
@@ -75,7 +75,7 @@ describe('PlaceholderAvatarController', () => {
   })
 
   it('plays a motion and clears it after its duration', async () => {
-    const controller = new PlaceholderAvatarController()
+    const controller = new ObservableAvatarController()
     const done = controller.playMotion('wave')
     expect(controller.getSnapshot().motion).toBe('wave')
     vi.advanceTimersByTime(MOTION_DURATION_MS.wave)
@@ -84,7 +84,7 @@ describe('PlaceholderAvatarController', () => {
   })
 
   it('clamps mouth and gaze values', () => {
-    const controller = new PlaceholderAvatarController()
+    const controller = new ObservableAvatarController()
     controller.setMouthOpen(2)
     controller.lookAt(-5, 0.5)
     expect(controller.getSnapshot().mouthOpen).toBe(1)
@@ -92,7 +92,7 @@ describe('PlaceholderAvatarController', () => {
   })
 
   it('blinks briefly', () => {
-    const controller = new PlaceholderAvatarController()
+    const controller = new ObservableAvatarController()
     controller.blink()
     expect(controller.getSnapshot().blinking).toBe(true)
     vi.advanceTimersByTime(500)

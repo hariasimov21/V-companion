@@ -1,7 +1,8 @@
-import { useEffect, useSyncExternalStore } from 'react'
+import { useSyncExternalStore } from 'react'
 
 import { type BrowShape, EMOTION_STYLES, type EyeShape, type MouthShape } from './emotionStyles'
-import type { PlaceholderAvatarController } from './PlaceholderAvatarController'
+import type { ObservableAvatarController } from '../ObservableAvatarController'
+import { useAutoBlink } from '../useAutoBlink'
 
 const EYE_X = { left: 78, right: 122 } as const
 const EYE_Y = 112
@@ -63,7 +64,7 @@ function Mouth({ shape, speaking, mouthOpen }: { shape: MouthShape; speaking: bo
 }
 
 interface PlaceholderAvatarProps {
-  controller: PlaceholderAvatarController
+  controller: ObservableAvatarController
 }
 
 export function PlaceholderAvatar({ controller }: PlaceholderAvatarProps) {
@@ -106,18 +107,4 @@ export function PlaceholderAvatar({ controller }: PlaceholderAvatarProps) {
       )}
     </svg>
   )
-}
-
-function useAutoBlink(controller: PlaceholderAvatarController): void {
-  useEffect(() => {
-    let timer: ReturnType<typeof setTimeout>
-    const schedule = () => {
-      timer = setTimeout(() => {
-        controller.blink()
-        schedule()
-      }, 2500 + Math.random() * 3500)
-    }
-    schedule()
-    return () => clearTimeout(timer)
-  }, [controller])
 }

@@ -40,6 +40,22 @@ class AIProvider(ABC):
     @abstractmethod
     async def analyze_image(self, image: ImageInput, prompt: str) -> str: ...
 
+    @property
+    def model(self) -> str | None:
+        """The model in use, when the provider exposes it."""
+        return None
+
+    async def list_models(self) -> list[str]:
+        """Chat models the user can switch to. Empty means switching is not supported."""
+        return []
+
+    async def set_model(self, model: str) -> None:
+        """Switches to another model from `list_models()`."""
+        raise NotImplementedError(f"{self.name} does not support switching models")
+
+    async def unload(self, model: str) -> None:  # noqa: B027 - optional hook, no-op by default
+        """Optional: free the memory (e.g. VRAM) held by a model that is no longer used."""
+
     async def warm_up(self) -> None:  # noqa: B027 - optional hook, no-op by default
         """Optional: prepare the model (e.g. load it into memory) before the first turn."""
 

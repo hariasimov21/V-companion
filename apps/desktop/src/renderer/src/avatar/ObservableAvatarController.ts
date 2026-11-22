@@ -1,6 +1,6 @@
-import type { AvatarController, AvatarExpression, AvatarMotion } from '../AvatarController'
+import type { AvatarController, AvatarExpression, AvatarMotion } from './AvatarController'
 
-export interface PlaceholderAvatarSnapshot {
+export interface AvatarSnapshot {
   expression: AvatarExpression
   motion: AvatarMotion | null
   /** Changes on every playMotion call so the same motion can replay. */
@@ -27,11 +27,11 @@ const BLINK_DURATION_MS = 140
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value))
 
 /**
- * Observable controller for the SVG placeholder avatar. It keeps an immutable snapshot
- * that React reads via useSyncExternalStore.
+ * Renderer-agnostic avatar state. Views (placeholder SVG, sprites...) read its immutable
+ * snapshot via useSyncExternalStore and decide how to draw it.
  */
-export class PlaceholderAvatarController implements AvatarController {
-  private snapshot: PlaceholderAvatarSnapshot = {
+export class ObservableAvatarController implements AvatarController {
+  private snapshot: AvatarSnapshot = {
     expression: { emotion: 'neutral', intensity: 0.5 },
     motion: null,
     motionKey: 0,
@@ -48,7 +48,7 @@ export class PlaceholderAvatarController implements AvatarController {
     return () => this.listeners.delete(listener)
   }
 
-  readonly getSnapshot = (): PlaceholderAvatarSnapshot => this.snapshot
+  readonly getSnapshot = (): AvatarSnapshot => this.snapshot
 
   async setExpression(expression: AvatarExpression): Promise<void> {
     this.update({ expression: { ...expression, intensity: clamp(expression.intensity, 0, 1) } })
@@ -84,7 +84,7 @@ export class PlaceholderAvatarController implements AvatarController {
     if (this.snapshot.speaking !== speaking) this.update({ speaking })
   }
 
-  private update(patch: Partial<PlaceholderAvatarSnapshot>): void {
+  private update(patch: Partial<AvatarSnapshot>): void {
     this.snapshot = { ...this.snapshot, ...patch }
     this.listeners.forEach((listener) => listener())
   }

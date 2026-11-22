@@ -12,6 +12,9 @@ from app.core.logging import get_logger
 log = get_logger("ai")
 
 THINK_LEVELS = {"low", "medium", "high"}
+# Only gpt-oss understands think levels. Other thinking models (qwen3, deepseek-r1...)
+# take any level as "think at full length": 50 s for a greeting in a test with qwen3.
+THINK_LEVEL_FAMILIES = {"gptoss"}
 # Loading a large model from disk can take much longer than a normal chat turn.
 WARM_UP_TIMEOUT = httpx.Timeout(180.0, connect=5.0)
 # Thinking models occasionally spend the whole turn reasoning and return no content.
@@ -41,19 +44,58 @@ class OllamaProvider(AIProvider):
         timeout_seconds: float,
         think: bool | str | None = None,
         keep_alive: str = "30m",
+        num_ctx: int | None = None,
         temperature: float = 0.8,
         transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
         self._base_url = base_url
         self._model = model
         self._think = think
+        # Capabilities reported by /api/show, per model ("completion", "thinking", ...).
+        # None = this Ollama version does not report them.
+        self._capabilities: dict[str, list[str] | None] = {}
+        self._families: dict[str, str] = {}
         self._keep_alive = keep_alive
-        self._temperature = temperature
+        # Same options on every request: a different num_ctx makes Ollama reload the model.
+        self._options: dict[str, Any] = {"temperature": temperature}
+        if num_ctx is not None:
+            self._options["num_ctx"] = num_ctx
         self._client = httpx.AsyncClient(
             base_url=base_url,
             timeout=httpx.Timeout(timeout_seconds, connect=5.0),
             transport=transport,
         )
+
+    @property
+    def model(self) -> str:
+        return self._model
+
+    async def list_models(self) -> list[str]:
+        """Installed models that can chat (embedding-only models are left out)."""
+        data = await self._call("GET", "/api/tags")
+        names = [
+            m["name"]
+            for m in data.get("models", [])
+            if isinstance(m, dict) and isinstance(m.get("name"), str)
+        ]
+        chat_models = []
+        for name in names:
+            capabilities = await self._capabilities_of(name)
+            if capabilities is None or "completion" in capabilities:
+                chat_models.append(name)
+        return sorted(chat_models)
+
+    async def set_model(self, model: str) -> None:
+        await self._capabilities_of(model)  # also fails early if it is not installed
+        self._model = model
+        log.info("Model selected", extra={"fields": {"model": model}})
+
+    async def unload(self, model: str) -> None:
+        """keep_alive=0 makes Ollama free the model's VRAM right away."""
+        try:
+            await self._call("POST", "/api/generate", {"model": model, "keep_alive": 0})
+        except AIProviderError as exc:
+            log.warning("Could not unload model", extra={"fields": {"error": exc.message}})
 
     async def chat(self, context: ChatContext) -> str:
         messages: list[dict[str, Any]] = [
@@ -71,7 +113,12 @@ class OllamaProvider(AIProvider):
         """An empty chat request makes Ollama load the model into memory."""
         try:
             await self._request(
-                {"model": self._model, "messages": [], "keep_alive": self._keep_alive},
+                {
+                    "model": self._model,
+                    "messages": [],
+                    "keep_alive": self._keep_alive,
+                    "options": self._options,
+                },
                 request_timeout=WARM_UP_TIMEOUT,
             )
             log.info("Model loaded", extra={"fields": {"model": self._model}})
@@ -89,12 +136,13 @@ class OllamaProvider(AIProvider):
             "messages": messages,
             "stream": False,
             "keep_alive": self._keep_alive,
-            "options": {"temperature": self._temperature},
+            "options": self._options,
         }
         if response_format is not None:
             payload["format"] = response_format
-        if self._think is not None:
-            payload["think"] = self._think
+        think = await self._think_for_current_model()
+        if think is not None:
+            payload["think"] = think
 
         for attempt in range(1 + EMPTY_REPLY_RETRIES):
             content = _extract_content(await self._request(payload))
@@ -103,12 +151,54 @@ class OllamaProvider(AIProvider):
             log.warning("Empty reply from model", extra={"fields": {"attempt": attempt + 1}})
         raise AIProviderError("The model returned an empty reply")
 
+    async def _capabilities_of(self, model: str) -> list[str] | None:
+        if model not in self._capabilities:
+            data = await self._call("POST", "/api/show", {"model": model})
+            details = data.get("details")
+            family = details.get("family") if isinstance(details, dict) else None
+            self._families[model] = family if isinstance(family, str) else ""
+            capabilities = data.get("capabilities")
+            self._capabilities[model] = (
+                [c for c in capabilities if isinstance(c, str)]
+                if isinstance(capabilities, list)
+                else None
+            )
+        return self._capabilities[model]
+
+    async def _think_for_current_model(self) -> bool | str | None:
+        """OLLAMA_THINK only applies to models that can think; others reject the field."""
+        if self._think is None:
+            return None
+        try:
+            capabilities = await self._capabilities_of(self._model)
+        except AIProviderError:
+            return self._think  # Let the chat request itself report the problem.
+        if capabilities is None:
+            return self._think
+        if "thinking" not in capabilities:
+            return None
+        if isinstance(self._think, str) and self._families.get(self._model) not in (
+            THINK_LEVEL_FAMILIES
+        ):
+            # A companion chat cannot wait for full reasoning: low/medium/high mean "off".
+            return False
+        return self._think
+
     async def _request(
         self, payload: dict[str, Any], request_timeout: httpx.Timeout | None = None
     ) -> dict[str, Any]:
+        return await self._call("POST", "/api/chat", payload, request_timeout)
+
+    async def _call(
+        self,
+        method: str,
+        path: str,
+        payload: dict[str, Any] | None = None,
+        request_timeout: httpx.Timeout | None = None,
+    ) -> dict[str, Any]:
         try:
-            response = await self._client.post(
-                "/api/chat", json=payload, timeout=request_timeout or self._client.timeout
+            response = await self._client.request(
+                method, path, json=payload, timeout=request_timeout or self._client.timeout
             )
         except httpx.TimeoutException as exc:
             raise AITimeoutError("Ollama took too long to answer") from exc
@@ -118,9 +208,8 @@ class OllamaProvider(AIProvider):
             ) from exc
 
         if response.status_code == 404:
-            raise AIProviderError(
-                f"Ollama model '{self._model}' not found. Run: ollama pull {self._model}"
-            )
+            model = (payload or {}).get("model", self._model)
+            raise AIProviderError(f"Ollama model '{model}' not found. Run: ollama pull {model}")
         if response.is_error:
             raise AIProviderError(f"Ollama error {response.status_code}: {_error_detail(response)}")
         try:

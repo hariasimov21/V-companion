@@ -26,18 +26,21 @@ def create_app(settings: Settings | None = None, provider: AIProvider | None = N
             "Backend ready",
             extra={
                 "fields": {
-                    "character": container.character.name,
+                    "characters": len(container.characters.all()),
                     "provider": container.provider.name,
                 }
             },
         )
-        # Warm up in the background so a slow model load never blocks startup.
-        warm_up = asyncio.create_task(container.provider.warm_up())
+        # Restore the saved model and load it in the background, so a slow model load never
+        # blocks startup (clients see `ai_model_loading` meanwhile).
+        warm_up = asyncio.create_task(container.conversation.restore_model())
         try:
             yield
         finally:
             warm_up.cancel()
+            await container.conversation.aclose()
             await container.provider.aclose()
+            container.store.close()
 
     app = FastAPI(title="Virtual companion backend", lifespan=lifespan)
     app.include_router(websocket_router)

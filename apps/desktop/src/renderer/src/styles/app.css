@@ -73,6 +73,61 @@ body {
 .status-badge--offline { background: #2a2a2e; color: var(--muted); }
 .status-badge--loading { background: #33284a; color: var(--accent); }
 
+.voice-toggle {
+  padding: 2px 8px;
+  font: inherit;
+  font-size: 12px;
+  color: var(--muted);
+  background: transparent;
+  border: 1px solid var(--panel-border);
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.voice-toggle--on {
+  color: var(--ok);
+  border-color: var(--ok);
+}
+
+.voice-toggle:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+
+.voice-toggle:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.voice-toggle:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.voice-volume {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.voice-volume input[type='range'] {
+  width: 90px;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.voice-volume input[type='range']:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.voice-volume__value {
+  min-width: 3.2em;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
 .model-picker {
   padding: 2px 6px;
   font: inherit;

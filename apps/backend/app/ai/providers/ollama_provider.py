@@ -15,6 +15,10 @@ THINK_LEVELS = {"low", "medium", "high"}
 # Only gpt-oss understands think levels. Other thinking models (qwen3, deepseek-r1...)
 # take any level as "think at full length": 50 s for a greeting in a test with qwen3.
 THINK_LEVEL_FAMILIES = {"gptoss"}
+# Sampling tweaks per model family, on top of the shared options. qwen3 copies phrases from
+# its own past replies into a catchphrase loop; presence_penalty (Qwen's recommendation)
+# cut that from 8/12 to 3/12 replies when replaying a real looping conversation.
+FAMILY_OPTIONS: dict[str, dict[str, Any]] = {"qwen3": {"presence_penalty": 1.0}}
 # Loading a large model from disk can take much longer than a normal chat turn.
 WARM_UP_TIMEOUT = httpx.Timeout(180.0, connect=5.0)
 # Thinking models occasionally spend the whole turn reasoning and return no content.
@@ -65,6 +69,11 @@ class OllamaProvider(AIProvider):
             timeout=httpx.Timeout(timeout_seconds, connect=5.0),
             transport=transport,
         )
+
+    @property
+    def context_window(self) -> int | None:
+        num_ctx = self._options.get("num_ctx")
+        return num_ctx if isinstance(num_ctx, int) else None
 
     @property
     def model(self) -> str:
@@ -136,7 +145,7 @@ class OllamaProvider(AIProvider):
             "messages": messages,
             "stream": False,
             "keep_alive": self._keep_alive,
-            "options": self._options,
+            "options": await self._options_for_current_model(),
         }
         if response_format is not None:
             payload["format"] = response_format
@@ -164,6 +173,13 @@ class OllamaProvider(AIProvider):
                 else None
             )
         return self._capabilities[model]
+
+    async def _options_for_current_model(self) -> dict[str, Any]:
+        try:
+            await self._capabilities_of(self._model)  # also learns the model family
+        except AIProviderError:
+            return self._options  # Let the chat request itself report the problem.
+        return {**self._options, **FAMILY_OPTIONS.get(self._families.get(self._model, ""), {})}
 
     async def _think_for_current_model(self) -> bool | str | None:
         """OLLAMA_THINK only applies to models that can think; others reject the field."""

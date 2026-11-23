@@ -140,9 +140,9 @@ async def test_empty_reply_is_retried_once() -> None:
 async def test_repeated_empty_reply_raises() -> None:
     calls = 0
 
-    def handler(_: httpx.Request) -> httpx.Response:
+    def handler(request: httpx.Request) -> httpx.Response:
         nonlocal calls
-        calls += 1
+        calls += request.url.path == "/api/chat"
         return ok_response("  ")
 
     with pytest.raises(AIProviderError, match="empty reply"):
@@ -266,3 +266,19 @@ async def test_think_level_means_no_thinking_for_models_without_levels() -> None
     await provider.set_model("qwen3:14b")
     await provider.chat(CONTEXT)
     assert [b for p, b in calls if p == "/api/chat"][-1]["think"] is False
+
+
+@pytest.mark.anyio
+async def test_qwen3_gets_presence_penalty_and_others_do_not() -> None:
+    calls: list[tuple[str, dict[str, Any]]] = []
+    provider = make_provider(fake_ollama(calls, CAPABILITIES), num_ctx=16384)
+
+    await provider.chat(CONTEXT)
+    options = [b for p, b in calls if p == "/api/chat"][-1]["options"]
+    assert "presence_penalty" not in options
+
+    await provider.set_model("qwen3:14b")
+    await provider.chat(CONTEXT)
+    options = [b for p, b in calls if p == "/api/chat"][-1]["options"]
+    assert options["presence_penalty"] == 1.0
+    assert options["num_ctx"] == 16384  # shared options are kept

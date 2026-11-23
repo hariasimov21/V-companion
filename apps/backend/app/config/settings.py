@@ -57,6 +57,10 @@ class Settings(BaseSettings):
     # Save conversations to disk (one history per character) so they survive restarts.
     memory_persist: bool = True
     memory_db: Path = Path("data/memory.sqlite3")
+    # Local TTS service (apps/tts). Voice is skipped while it is not running.
+    tts_url: str = "http://127.0.0.1:8010"
+    # Initial state of the voice toggle; the user's choice in the app is remembered.
+    voice_enabled: bool = True
     # Long-term memory: facts about the user + summary of what left the recent window.
     long_term_memory_enabled: bool = True
     # Messages folded into long-term memory per update (one extra model call each time).

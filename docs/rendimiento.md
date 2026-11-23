@@ -83,6 +83,41 @@ de contexto cuesta 1,2–2,6 GB más.
   **16k es el mínimo cómodo**.
 - Con 8k de contexto habría que bajar `SHORT_TERM_MEMORY_SIZE` a unos 40.
 
+## Voz (Qwen3-TTS)
+
+Servicio de voz (`make tts`): modelo Base 0.6B cuantizado a 8 bits (Q8_0) con
+**qwentts.cpp**, clonando la voz de cada personaje. Medido el 2026-11-23 con la GPU libre:
+
+| | qwentts.cpp Q8_0 (actual) | Antes: PyTorch (`faster-qwen3-tts`) |
+|---|---|---|
+| VRAM del proceso | **~3,0–3,4 GB** | 3,8 GB |
+| Arranque (carga + preparar 5 voces) | **~7 s** | ~20 s |
+| Velocidad | **6–8× tiempo real** | ~3× (1,5× con la GPU casi llena) |
+| Primer audio | **0,13–0,30 s** | 0,4 s |
+| Entorno de Python | **~300 MB** | 6,3 GB |
+
+La calidad es la misma de oído (comparado lado a lado). Reservar menos memoria en PyTorch
+(`max_seq_len` 1024/768) solo ahorraba 0,14–0,27 GB, y la versión a 4 bits (Q4_K_M) apenas
+0,2 GB más que la de 8 bits. qwentts.cpp reserva un búfer fijo de 896 MB (4.096 pasos) que
+no se puede ajustar.
+
+**Voz + modelo de chat a la vez** (voz cargada primero; ventana de Electron cerrada):
+
+| Modelo de chat | GPU total (de 16,3 GB) | Primer audio | Holgura |
+|---|---|---|---|
+| qwen3:14b, `num_ctx` 16384 | 15,8 GB | 0,9 s | muy justa |
+| **qwen3:14b, `num_ctx` 8192** | **15,3 GB** | **0,4 s** | buena (configuración elegida) |
+| mistral-nemo, `num_ctx` 16384 | 14,6 GB | 0,5 s | cómoda |
+| gpt-oss, `num_ctx` 8192 | 15,7 GB | 0,7–1 s | justa |
+
+Si la VRAM se desborda, Windows no da error: usa RAM compartida y todo se ralentiza. Con
+la app de escritorio abierta se suma ~1 GB más: si va lento, baja el contexto o desactiva la
+voz.
+
+Otros motores probados en español (2026-11-22): Kokoro (CPU, muy rápido pero una sola voz
+femenina en español), Chatterbox Multilingual (≈ tiempo real, 3,7 GB, sin mantenimiento) y
+Qwen3-TTS con la librería oficial (2–3,6× más lento que tiempo real).
+
 ## Sin GPU (solo CPU)
 
 Prueba con mistral-nemo, el modelo más liviano, en el Ryzen 7 7800X3D:
@@ -105,6 +140,8 @@ Funciona, pero no sirve para conversar.
 | Cada modelo de Ollama | 7–13 GB | Con IA local; uno como mínimo |
 | Herramienta de sprites (`tools/avatar/.venv`) | 591 MB | Solo para procesar imágenes |
 | Modelo para quitar fondos (`~/.rembg`, birefnet) | 928 MB | Solo para procesar imágenes |
+| Entorno de voz (`apps/tts/.venv`, qwentts.cpp) | ~300 MB | Solo con voz |
+| Modelos de voz GGUF (Hugging Face, `~/.cache/huggingface`) | ~1 GB (0.6B Q8_0) + ~2 GB (diseño 1.7B Q8_0) | Solo con voz |
 | Personajes, sprites y base de datos | ~25 MB | Siempre |
 
 Ahora mismo tienes 55 GB de modelos en Ollama. Si no los usas, puedes borrar

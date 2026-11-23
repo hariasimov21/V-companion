@@ -19,6 +19,7 @@ def app_settings(characters_dir: Path, tmp_path: Path) -> Settings:
         characters_dir=characters_dir,
         default_character="testy",
         memory_db=tmp_path / "memory.sqlite3",
+        tts_url="http://127.0.0.1:9",  # never a real TTS service in tests
     )
 
 

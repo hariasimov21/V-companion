@@ -3,7 +3,9 @@ import { useCallback, useEffect, useReducer, useRef, useState } from 'react'
 import { AvatarDirector } from '../avatar/AvatarDirector'
 import { ObservableAvatarController } from '../avatar/ObservableAvatarController'
 import { appConfig } from '../config/appConfig'
-import type { ServerEvent } from '../protocol/types'
+import type { AssistantMessageEvent, ServerEvent } from '../protocol/types'
+import { AudioSpeechPlayer } from '../speech/AudioSpeechPlayer'
+import { clampVolume, loadVoiceVolume, saveVoiceVolume } from '../speech/voiceVolume'
 import { TextOnlySpeechOutput } from '../speech/SpeechOutput'
 import { type AppState, appReducer, initialAppState } from '../state/appState'
 import { BackendClient } from '../websocket/BackendClient'
@@ -15,6 +17,10 @@ interface CompanionSession {
   selectCharacter: (characterId: string) => boolean
   clearConversation: () => boolean
   selectModel: (model: string) => boolean
+  setVoice: (enabled: boolean) => boolean
+  /** 0 .. 1.5, remembered on this device. */
+  voiceVolume: number
+  setVoiceVolume: (volume: number) => void
 }
 
 /**
@@ -28,6 +34,13 @@ export function useCompanionSession(): CompanionSession {
     () => new BackendClient(appConfig.backendWsUrl, appConfig.reconnect),
   )
   const speechAbort = useRef<AbortController | null>(null)
+  const [voiceVolume, setVolumeState] = useState(loadVoiceVolume)
+  // Real lip sync: the mouth follows the loudness of the character's voice.
+  const [voice] = useState(() => {
+    const player = new AudioSpeechPlayer((level) => avatar.setMouthOpen(level))
+    player.setVolume(loadVoiceVolume())
+    return player
+  })
 
   useEffect(() => {
     const director = new AvatarDirector(avatar)
@@ -38,12 +51,15 @@ export function useCompanionSession(): CompanionSession {
       speechAbort.current = null
     }
 
-    const speak = (text: string) => {
+    /** Voiced replies play their streamed audio; the rest wait a reading-time estimate. */
+    const speak = (message: AssistantMessageEvent) => {
       stopSpeech()
       const abort = new AbortController()
       speechAbort.current = abort
-      speech
-        .speak(text, abort.signal)
+      const done = message.voice
+        ? voice.play(message.utterance_id, abort.signal)
+        : speech.speak(message.text, abort.signal)
+      done
         .then(() => client.send({ type: 'speech_finished' }))
         .catch(() => undefined) // Aborted: a newer turn or a disconnect took over.
     }
@@ -57,7 +73,11 @@ export function useCompanionSession(): CompanionSession {
         director.reset()
       } else if (event.type === 'assistant_message') {
         director.onAssistantMessage(event)
-        speak(event.text)
+        speak(event)
+      } else if (event.type === 'speech_audio') {
+        voice.push(event.utterance_id, event.sample_rate, event.pcm)
+      } else if (event.type === 'speech_end') {
+        voice.end(event.utterance_id)
       }
     }
 
@@ -75,9 +95,10 @@ export function useCompanionSession(): CompanionSession {
       offEvent()
       offStatus()
       stopSpeech()
+      voice.dispose()
       client.disconnect()
     }
-  }, [avatar, client])
+  }, [avatar, client, voice])
 
   const sendUserMessage = useCallback(
     (text: string) => {
@@ -106,5 +127,30 @@ export function useCompanionSession(): CompanionSession {
     [client],
   )
 
-  return { state, avatar, sendUserMessage, selectCharacter, clearConversation, selectModel }
+  const setVoice = useCallback(
+    (enabled: boolean) => client.send({ type: 'set_voice', enabled }),
+    [client],
+  )
+
+  const setVoiceVolume = useCallback(
+    (volume: number) => {
+      const clamped = clampVolume(volume)
+      voice.setVolume(clamped)
+      saveVoiceVolume(clamped)
+      setVolumeState(clamped)
+    },
+    [voice],
+  )
+
+  return {
+    state,
+    avatar,
+    sendUserMessage,
+    selectCharacter,
+    clearConversation,
+    selectModel,
+    setVoice,
+    voiceVolume,
+    setVoiceVolume,
+  }
 }

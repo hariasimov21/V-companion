@@ -19,6 +19,9 @@ export interface SessionInfo {
   aiModels: string[]
   /** A newly selected model is loading into memory: nothing can be sent meanwhile. */
   modelLoading: boolean
+  /** TTS ready and the active character has a voice. */
+  voiceAvailable: boolean
+  voiceEnabled: boolean
   privacy: PrivacySettings
 }
 
@@ -99,6 +102,8 @@ function reduceServerEvent(state: AppState, event: ServerEvent): AppState {
             aiModel: event.ai_model,
             aiModels: event.ai_models,
             modelLoading: event.ai_model_loading,
+            voiceAvailable: event.voice_available,
+            voiceEnabled: event.voice_enabled,
             privacy: event.privacy,
           },
         },
@@ -132,6 +137,18 @@ function reduceServerEvent(state: AppState, event: ServerEvent): AppState {
         },
         lastError: null,
       }
+    case 'voice_changed':
+      return {
+        ...state,
+        session: state.session && {
+          ...state.session,
+          voiceAvailable: event.available,
+          voiceEnabled: event.enabled,
+        },
+      }
+    case 'speech_audio':
+    case 'speech_end':
+      return state // audio goes straight to the player, not through UI state
     case 'state_changed':
       return { ...state, phase: event.state }
     case 'assistant_message':

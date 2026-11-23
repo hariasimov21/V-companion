@@ -41,6 +41,11 @@ class AIProvider(ABC):
     async def analyze_image(self, image: ImageInput, prompt: str) -> str: ...
 
     @property
+    def context_window(self) -> int | None:
+        """Tokens the model reads per request, when the provider has a fixed window."""
+        return None
+
+    @property
     def model(self) -> str | None:
         """The model in use, when the provider exposes it."""
         return None

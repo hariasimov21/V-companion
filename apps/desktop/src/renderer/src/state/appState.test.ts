@@ -25,7 +25,7 @@ describe('appReducer', () => {
           type: 'server_event',
           event: {
             type: 'session_ready',
-            protocol_version: 4,
+            protocol_version: 5,
             character_id: 'akari',
             character_name: 'Akari',
             characters: [
@@ -42,6 +42,8 @@ describe('appReducer', () => {
             ai_model: 'gpt-oss:latest',
             ai_models: ['gpt-oss:latest', 'qwen3:14b'],
             ai_model_loading: false,
+            voice_available: true,
+            voice_enabled: true,
             privacy: { microphone_enabled: false, camera_enabled: false, remote_vision_enabled: false },
             state: 'idle',
           },
@@ -69,6 +71,8 @@ describe('appReducer', () => {
         aiModel: null,
         aiModels: [],
         modelLoading: false,
+        voiceAvailable: false,
+        voiceEnabled: true,
         privacy: { microphone_enabled: false, camera_enabled: false, remote_vision_enabled: false },
       },
       emotion: 'happy',
@@ -108,6 +112,8 @@ describe('appReducer', () => {
         aiModel: null,
         aiModels: [],
         modelLoading: false,
+        voiceAvailable: false,
+        voiceEnabled: true,
         privacy: { microphone_enabled: false, camera_enabled: false, remote_vision_enabled: false },
       },
       emotion: 'happy',
@@ -141,6 +147,8 @@ describe('appReducer', () => {
         aiModel: 'gpt-oss:latest',
         aiModels: ['gpt-oss:latest', 'qwen3:14b'],
         modelLoading: false,
+        voiceAvailable: false,
+        voiceEnabled: true,
         privacy: { microphone_enabled: false, camera_enabled: false, remote_vision_enabled: false },
       },
     }
@@ -163,6 +171,41 @@ describe('appReducer', () => {
     expect(selectCanSend(loaded)).toBe(true)
   })
 
+  it('tracks voice availability and the toggle', () => {
+    const base = run(
+      [
+        {
+          type: 'server_event',
+          event: {
+            type: 'session_ready',
+            protocol_version: 5,
+            character_id: 'akari',
+            character_name: 'Akari',
+            characters: [],
+            history: [],
+            ai_provider: 'ollama',
+            ai_is_remote: false,
+            ai_model: 'qwen3:14b',
+            ai_models: ['qwen3:14b'],
+            ai_model_loading: false,
+            voice_available: false,
+            voice_enabled: true,
+            privacy: { microphone_enabled: false, camera_enabled: false, remote_vision_enabled: false },
+            state: 'idle',
+          },
+        },
+      ],
+      connected,
+    )
+    expect(base.session?.voiceAvailable).toBe(false)
+    const changed = appReducer(base, {
+      type: 'server_event',
+      event: { type: 'voice_changed', available: true, enabled: false },
+    })
+    expect(changed.session?.voiceAvailable).toBe(true)
+    expect(changed.session?.voiceEnabled).toBe(false)
+  })
+
   it('tracks a full turn', () => {
     const state = run(
       [
@@ -177,6 +220,8 @@ describe('appReducer', () => {
             emotion_intensity: 0.8,
             gesture: 'nod',
             look_at_user: true,
+            utterance_id: 1,
+            voice: false,
           },
         },
         { type: 'server_event', event: { type: 'state_changed', state: 'speaking' } },

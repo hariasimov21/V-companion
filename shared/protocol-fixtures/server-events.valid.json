@@ -1,7 +1,7 @@
 [
   {
     "type": "session_ready",
-    "protocol_version": 4,
+    "protocol_version": 5,
     "character_id": "akari",
     "character_name": "Akari",
     "characters": [{ "id": "akari", "name": "Akari" }, { "id": "mimi", "name": "Mimi" }],
@@ -15,6 +15,8 @@
     "ai_model": "gpt-oss:latest",
     "ai_models": ["gpt-oss:latest", "mistral-nemo:latest", "qwen3:14b"],
     "ai_model_loading": false,
+    "voice_available": true,
+    "voice_enabled": true,
     "privacy": { "microphone_enabled": false, "camera_enabled": false, "remote_vision_enabled": false },
     "state": "idle"
   },
@@ -25,10 +27,15 @@
     "emotion": "happy",
     "emotion_intensity": 0.8,
     "gesture": "nod",
-    "look_at_user": true
+    "look_at_user": true,
+    "utterance_id": 7,
+    "voice": true
   },
   { "type": "error", "code": "ai_timeout", "message": "The AI took too long to answer" },
   { "type": "character_changed", "character_id": "mimi", "character_name": "Mimi", "history": [] },
   { "type": "conversation_cleared", "character_id": "mimi" },
-  { "type": "model_changed", "model": "mistral-nemo:latest", "loading": true }
+  { "type": "model_changed", "model": "mistral-nemo:latest", "loading": true },
+  { "type": "speech_audio", "utterance_id": 7, "seq": 0, "sample_rate": 24000, "pcm": "AAD/fw==" },
+  { "type": "speech_end", "utterance_id": 7, "ok": true },
+  { "type": "voice_changed", "available": false, "enabled": true }
 ]

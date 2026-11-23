@@ -14,6 +14,7 @@ from app.models.protocol import (
     SelectCharacter,
     SelectModel,
     SessionReady,
+    SetVoice,
     SpeechFinished,
     UserMessage,
     client_event_adapter,
@@ -73,6 +74,8 @@ async def _dispatch(container: AppContainer, websocket: WebSocket, event: Client
                 await container.conversation.clear_conversation()
             case SelectModel(model=model):
                 await container.conversation.switch_model(model)
+            case SetVoice(enabled=enabled):
+                await container.speech.set_enabled(enabled)
     except AppError as exc:
         await _send_error(container, websocket, ErrorEvent(code=exc.code, message=exc.message))
     except Exception:
@@ -104,6 +107,8 @@ async def _session_ready(container: AppContainer) -> SessionReady:
         ai_model=conversation.model,
         ai_models=await conversation.available_models(),
         ai_model_loading=conversation.model_loading,
+        voice_available=container.speech.available(),
+        voice_enabled=container.speech.enabled,
         privacy=container.settings.privacy,
         state=container.state.phase,
     )

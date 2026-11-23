@@ -34,10 +34,12 @@ def create_app(settings: Settings | None = None, provider: AIProvider | None = N
         # Restore the saved model and load it in the background, so a slow model load never
         # blocks startup (clients see `ai_model_loading` meanwhile).
         warm_up = asyncio.create_task(container.conversation.restore_model())
+        container.speech.start_monitor()
         try:
             yield
         finally:
             warm_up.cancel()
+            await container.speech.aclose()
             await container.conversation.aclose()
             await container.provider.aclose()
             container.store.close()

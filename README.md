@@ -106,12 +106,14 @@ Todas en `.env` en la raíz (ver `.env.example`). El backend las lee solo a trav
 | `OLLAMA_MODEL` | — | Requerido si `AI_PROVIDER=ollama` (p. ej. `gpt-oss:latest`). Modelo inicial: el que elijas en la app lo sustituye y se recuerda |
 | `OLLAMA_THINK` | vacío | Razonamiento en modelos "thinking": `low`, `medium`, `high`, `true`, `false`. Los niveles solo los entiende gpt-oss; en otros (qwen3) significan "sin razonar" |
 | `OLLAMA_KEEP_ALIVE` | `30m` | Tiempo que el modelo queda en VRAM tras cada mensaje |
-| `OLLAMA_NUM_CTX` | `16384` | Ventana de contexto en tokens. Las personalidades ocupan ~5k; no bajar de 16k |
+| `OLLAMA_NUM_CTX` | `16384` | Ventana de contexto en tokens. Las personalidades ocupan ~5–6k. Con voz en una GPU de 16 GB: `8192` (y `SHORT_TERM_MEMORY_SIZE=30`). Si el historial no cabe, el backend descarta los mensajes más antiguos |
 | `BACKEND_HOST` / `BACKEND_PORT` | `127.0.0.1` / `8000` | |
 | `LOG_LEVEL` | `INFO` | `DEBUG` muestra transiciones de estado |
 | `CHARACTERS_DIR` | `characters` | Carpeta de personajes, relativa a la raíz del repo |
 | `DEFAULT_CHARACTER` | `akari` | Personaje con el que arranca la app (nombre de su carpeta) |
 | `SHORT_TERM_MEMORY_SIZE` | `30` | Mensajes recientes del personaje activo enviados como contexto |
+| `TTS_URL` | `http://127.0.0.1:8010` | Servicio de voz local (`make tts`). Sin él, solo texto |
+| `VOICE_ENABLED` | `true` | Estado inicial del botón de voz; lo que elijas en la app se recuerda |
 | `MEMORY_PERSIST` | `true` | Guarda las conversaciones en disco (`false` = solo en RAM) |
 | `MEMORY_DB` | `data/memory.sqlite3` | Archivo SQLite de conversaciones (ignorado por git) |
 | `LONG_TERM_MEMORY_ENABLED` | `true` | Memoria a largo plazo (datos tuyos + resumen) |
@@ -122,6 +124,25 @@ Todas en `.env` en la raíz (ver `.env.example`). El backend las lee solo a trav
 | `VITE_BACKEND_WS_URL` | `ws://127.0.0.1:8000/ws` | URL del backend para el frontend |
 | `VITE_AVATAR_RENDERER` | `sprite` | `sprite` o `placeholder` (un personaje sin sprites usa el placeholder) |
 
+## Arrancar todo (recomendado)
+
+```bash
+make dev              # voz (si está instalada) + backend + app, en una sola terminal
+make dev NO_VOICE=1   # sin voz (libera ~3 GB de VRAM)
+make dev WEB=1        # versión de navegador en vez de la ventana (recomendado en WSL)
+make web              # solo la página, en http://127.0.0.1:5173
+```
+
+> **En WSL, usa la versión de navegador para oír la voz.** El sonido de la ventana de
+> escritorio pasa por el canal de audio de WSLg (PulseAudio → RDP → Windows), que se
+> entrecorta y llega a atascarse (comprobado: un clip de 9,5 s no terminaba de sonar). Un
+> navegador de Windows reproduce la voz directamente. Abre **`http://127.0.0.1:5173`**: con
+> la red "mirrored" de WSL, `localhost` puede quedarse colgado.
+
+Cada línea lleva la etiqueta de su servicio (`[voz]`, `[backend]`, `[app]`) y **Ctrl+C
+detiene los tres**. Si prefieres terminales separadas, siguen existiendo `make tts`,
+`make backend` y `make desktop`.
+
 ## Cómo ejecutar el backend
 
 ```bash
@@ -130,6 +151,40 @@ make backend-dev    # con autoreload
 ```
 
 Comprobación: `curl http://127.0.0.1:8000/health` → `{"status":"ok"}`.
+
+## Voz (opcional)
+
+Cada personaje habla con su propia voz, generada en tu PC con **Qwen3-TTS** (clonando una
+muestra de voz del personaje), cuantizado a 8 bits y ejecutado con **qwentts.cpp** (GGML +
+CUDA, sin PyTorch). El audio se envía por partes mientras se genera: empieza a sonar ~0,2 s
+después del texto, y la boca del avatar sigue el volumen real de la voz.
+
+```bash
+make setup-tts                # una vez: entorno propio (~300 MB; descarga ~1 GB de modelos)
+make tts                      # servicio en 127.0.0.1:8010; listo en ~7 s
+```
+
+- Requiere GPU NVIDIA con drivers para CUDA 12.8+: el servicio usa ~3 GB de VRAM. Con 16 GB y un modelo de chat
+  grande, usa `OLLAMA_NUM_CTX=8192` (ver [docs/rendimiento.md](docs/rendimiento.md)).
+- El orden de arranque da igual: el backend detecta el servicio cuando está listo. Si no
+  está, la app funciona solo con texto.
+- Botón **Voz ON/OFF** en la barra de estado (se recuerda). Escribir mientras habla la
+  interrumpe.
+
+**Voz de cada personaje** (`characters/<id>/`, ignorado por git):
+
+| Archivo | Qué es |
+|---|---|
+| `voice.yaml` | Descripción de la voz (en inglés) y una frase de muestra |
+| `voice.wav` + `voice.txt` | La muestra que se clona y su transcripción exacta |
+| `voice-candidates/` | Candidatas generadas por `make voice` |
+
+```bash
+make voice CHARACTER=mimi            # diseña 3 candidatas desde voice.yaml (~35 s)
+make voice CHARACTER=mimi PICK=2     # usar la candidata 2; luego reinicia make tts
+```
+
+Si la GPU va justa al diseñar, detén antes `make tts` o libera el modelo de chat (`ollama stop <modelo>`).
 
 ## Cómo ejecutar el frontend
 
@@ -141,6 +196,12 @@ make desktop        # o: cd apps/desktop && npm run dev
 
 Se abre la ventana de Electron. Si el backend no está activo, la UI muestra **Offline** y
 reintenta la conexión automáticamente con backoff exponencial.
+
+> **WSL**: la app desactiva la aceleración gráfica de la ventana (con ella, maximizar la
+> ventana la colgaba y dejaba WSLg sin poder mostrar ventanas hasta `wsl --shutdown`). La IA y
+> la voz siguen usando la GPU en sus propios procesos. Para volver a activarla:
+> `MALFOID_GPU=1 make desktop`. Si WSLg queda roto (la app aparece en la barra de tareas pero
+> no se ve), usa la versión de navegador: `make dev WEB=1` y `http://127.0.0.1:5173`.
 
 > **VS Code**: su terminal integrada exporta `ELECTRON_RUN_AS_NODE=1`, lo que rompe Electron.
 > `npm run dev` / `npm run preview` ya lo eliminan (`scripts/electron-vite.mjs`). Si lanzas
@@ -175,7 +236,7 @@ Comparativa en una RTX 5080 (16 GB) con los 5 personajes (2 preguntas cada uno):
 | Modelo | VRAM | Latencia | Comentario |
 |---|---|---|---|
 | `gpt-oss:latest` (think `low`) | 12,7 GB | 2–4 s | Recomendado: el más marcado en personalidad y respuestas de 35–65 palabras. |
-| `qwen3:14b` (sin razonar) | 11,7 GB | 2–6 s | Muy cerca: buen personaje, algo más contenido. Con razonamiento tarda ~50 s. |
+| `qwen3:14b` (sin razonar) | 11,7 GB | 2–6 s | Muy cerca: buen personaje, algo más contenido. Con razonamiento tarda ~50 s. Tiende a repetir muletillas de su propio historial (la app le aplica `presence_penalty` 1.0, que lo reduce sin eliminarlo). |
 | `mistral-nemo:latest` | 9,6 GB | 1–7 s | En personaje pero más breve (12–57 palabras) y más suave (Mimi pierde sarcasmo). |
 | `qwen2.5-coder:14b` | ~9 GB | ~1 s | JSON correcto pero respuestas planas (modelo para código). |
 | `glm-4.7-flash` | 19 GB | >5 min | No cabe en 16 GB de VRAM. |
@@ -288,7 +349,8 @@ make check    # todo lo anterior
 ## Estado de implementación
 
 **Fases 0 y 1 completadas**, con IA local real vía Ollama. **Fase 2 en curso:** avatar de
-sprites y varios personajes listos; Live2D pendiente.
+sprites y varios personajes listos; Live2D pendiente. **Fase 3 en curso:** voz de los
+personajes lista; micrófono pendiente.
 
 - [x] Electron + React + Vite + TypeScript estricto
 - [x] FastAPI + WebSocket con protocolo tipado (Pydantic ↔ TypeScript) y fixtures compartidas
@@ -303,6 +365,7 @@ sprites y varios personajes listos; Live2D pendiente.
 - [x] Herramienta `tools/avatar/prepare_sprites.py`: modos static y layered, validación de alineación, quitado de fondo y exportación
 - [x] Varios personajes (`characters/<id>/`), personalidad completa en `prompt.md` y selector en la app
 - [ ] Live2D
+- [x] Voz por personaje (Qwen3-TTS local, clonación de una voz diseñada), audio en streaming, lip sync por volumen y botón Voz ON/OFF
 - [x] Indicadores: estado, conexión, emoción, proveedor local/remoto, Mic OFF, Camera OFF
 - [x] Reconexión WebSocket con backoff, errores de IA mostrados en la UI
 - [x] Logging estructurado con etiquetas (`[AI]`, `[WS]`, `[STATE]`…)
@@ -314,7 +377,7 @@ sprites y varios personajes listos; Live2D pendiente.
 | 0 | Análisis y estructura | ✅ |
 | 1 | Chat de texto + avatar placeholder + mock | ✅ |
 | 2 | Avatar real: sprites ✅, Live2D (expresiones y motions mapeadas por configuración) | 🚧 en curso |
-| 3 | Micrófono, VAD, TTS, lip sync | |
+| 3 | Voz del personaje (TTS) y lip sync ✅; micrófono y VAD | 🚧 |
 | 4 | Cámara, captura de frames, visión | |
 | 5 | Memoria persistente: historial por personaje en SQLite ✅, memoria a largo plazo (datos + resumen) ✅; embeddings y recuperación semántica | 🚧 |
 | 6 | EventBus, presencia, comportamiento proactivo con cooldowns | |

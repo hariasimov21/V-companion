@@ -27,6 +27,8 @@ const isEmotion = isOneOf(EMOTIONS)
 const isGesture = isOneOf(GESTURES)
 const isErrorCode = isOneOf(ERROR_CODES)
 
+const isInteger = (value: unknown): value is number => Number.isInteger(value)
+
 const isUnitInterval = (value: unknown): value is number =>
   typeof value === 'number' && value >= 0 && value <= 1
 
@@ -68,6 +70,8 @@ const validators: Record<ServerEvent['type'], (data: JsonObject) => boolean> = {
     Array.isArray(d['ai_models']) &&
     d['ai_models'].every(isString) &&
     isBoolean(d['ai_model_loading']) &&
+    isBoolean(d['voice_available']) &&
+    isBoolean(d['voice_enabled']) &&
     isPrivacy(d['privacy']) &&
     isPhase(d['state']),
   character_changed: (d) =>
@@ -80,7 +84,18 @@ const validators: Record<ServerEvent['type'], (data: JsonObject) => boolean> = {
     isEmotion(d['emotion']) &&
     isUnitInterval(d['emotion_intensity']) &&
     isGesture(d['gesture']) &&
-    isBoolean(d['look_at_user']),
+    isBoolean(d['look_at_user']) &&
+    isInteger(d['utterance_id']) &&
+    isBoolean(d['voice']),
+  speech_audio: (d) =>
+    isInteger(d['utterance_id']) &&
+    isInteger(d['seq']) &&
+    (d['seq'] as number) >= 0 &&
+    isInteger(d['sample_rate']) &&
+    (d['sample_rate'] as number) > 0 &&
+    isString(d['pcm']),
+  speech_end: (d) => isInteger(d['utterance_id']) && isBoolean(d['ok']),
+  voice_changed: (d) => isBoolean(d['available']) && isBoolean(d['enabled']),
   error: (d) => isErrorCode(d['code']) && isString(d['message']),
 }
 

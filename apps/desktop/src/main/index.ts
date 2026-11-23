@@ -1,5 +1,23 @@
+import { release } from 'node:os'
 import { join } from 'node:path'
 import { app, BrowserWindow, session, shell } from 'electron'
+
+/**
+ * Under WSL the window is drawn through WSLg's RDP bridge. With GPU compositing, resizing
+ * or maximizing the window froze it and left WSLg unable to show any Linux window until
+ * `wsl --shutdown`. Software rendering is plenty for the avatar's CSS animations; the AI
+ * and the voice use the GPU in their own processes. MALFOID_GPU=1 turns it back on.
+ */
+function isWsl(): boolean {
+  return (
+    process.platform === 'linux' &&
+    (Boolean(process.env['WSL_DISTRO_NAME']) || release().toLowerCase().includes('microsoft'))
+  )
+}
+
+if (isWsl() && process.env['MALFOID_GPU'] !== '1') {
+  app.disableHardwareAcceleration()
+}
 
 function createMainWindow(): BrowserWindow {
   const window = new BrowserWindow({
@@ -15,6 +33,8 @@ function createMainWindow(): BrowserWindow {
       contextIsolation: true,
       sandbox: true,
       nodeIntegration: false,
+      // The character's voice plays as soon as a reply arrives, not only after a click.
+      autoplayPolicy: 'no-user-gesture-required',
     },
   })
 

@@ -17,6 +17,8 @@ from app.memory.store import (
 )
 from app.models.protocol import StateChanged
 from app.models.state import AssistantPhase
+from app.speech.service import SpeechService
+from app.speech.tts_client import TTSClient
 
 
 @dataclass(frozen=True)
@@ -27,6 +29,7 @@ class AppContainer:
     state: CharacterStateStore
     connections: ConnectionManager
     store: ConversationStore
+    speech: SpeechService
     conversation: ConversationService
 
 
@@ -51,6 +54,15 @@ def build_container(settings: Settings, provider: AIProvider | None = None) -> A
     if active_id not in {c.id for c in characters.all()}:
         active_id = characters.default_id
 
+    speech = SpeechService(
+        TTSClient(settings.tts_url),
+        store=store,
+        publisher=connections,
+        characters_dir=settings.characters_path,
+        enabled_by_default=settings.voice_enabled,
+    )
+    speech.attach_character(characters.get(active_id))
+
     conversation = ConversationService(
         provider=provider,
         character=characters.get(active_id),
@@ -66,5 +78,8 @@ def build_container(settings: Settings, provider: AIProvider | None = None) -> A
             else None
         ),
         memory_batch=settings.memory_batch_messages,
+        speech=speech,
     )
-    return AppContainer(settings, provider, characters, state, connections, store, conversation)
+    return AppContainer(
+        settings, provider, characters, state, connections, store, speech, conversation
+    )

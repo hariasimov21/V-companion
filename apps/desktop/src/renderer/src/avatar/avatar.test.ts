@@ -28,6 +28,8 @@ describe('AvatarDirector', () => {
       emotion_intensity: 0.8,
       gesture: 'nod',
       look_at_user: true,
+      utterance_id: 1,
+      voice: false,
     })
     expect(avatar.setExpression).toHaveBeenCalledWith({ emotion: 'happy', intensity: 0.8 })
     expect(avatar.playMotion).toHaveBeenCalledWith('nod')
@@ -43,6 +45,8 @@ describe('AvatarDirector', () => {
       emotion_intensity: 0.5,
       gesture: 'none',
       look_at_user: false,
+      utterance_id: 1,
+      voice: false,
     })
     expect(avatar.playMotion).not.toHaveBeenCalled()
     expect(avatar.lookAt).not.toHaveBeenCalled()

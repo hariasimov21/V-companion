@@ -34,3 +34,6 @@ characters1img/
 characters/
 apps/desktop/src/renderer/src/avatar/sprite/assets/
 *:Zone.Identifier
+
+# Private working notes (process, decisions, pending): local only
+docs/proceso.md

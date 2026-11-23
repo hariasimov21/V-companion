@@ -88,6 +88,10 @@ class ConversationStore(Protocol):
 
     def set_preferred_model(self, model: str) -> None: ...
 
+    def get_voice_enabled(self) -> bool | None: ...
+
+    def set_voice_enabled(self, enabled: bool) -> None: ...
+
     def close(self) -> None: ...
 
 
@@ -136,6 +140,13 @@ class InMemoryConversationStore:
 
     def set_preferred_model(self, model: str) -> None:
         self._app_values["ai_model"] = model
+
+    def get_voice_enabled(self) -> bool | None:
+        value = self._app_values.get("voice_enabled")
+        return None if value is None else value == "1"
+
+    def set_voice_enabled(self, enabled: bool) -> None:
+        self._app_values["voice_enabled"] = "1" if enabled else "0"
 
     def close(self) -> None:
         pass
@@ -222,6 +233,13 @@ class SqliteConversationStore:
 
     def set_preferred_model(self, model: str) -> None:
         self._set_value("ai_model", model)
+
+    def get_voice_enabled(self) -> bool | None:
+        value = self._get_value("voice_enabled")
+        return None if value is None else value == "1"
+
+    def set_voice_enabled(self, enabled: bool) -> None:
+        self._set_value("voice_enabled", "1" if enabled else "0")
 
     def _get_value(self, key: str) -> str | None:
         row = self._db.execute("SELECT value FROM app_state WHERE key = ?", (key,)).fetchone()

@@ -11,14 +11,29 @@ import {
 } from './state/appState'
 
 export function App() {
-  const { state, avatar, sendUserMessage, selectCharacter, clearConversation, selectModel } =
-    useCompanionSession()
+  const {
+    state,
+    avatar,
+    sendUserMessage,
+    selectCharacter,
+    clearConversation,
+    selectModel,
+    setVoice,
+    voiceVolume,
+    setVoiceVolume,
+  } = useCompanionSession()
   const { session } = state
   const characterName = session?.characterName ?? '…'
 
   return (
     <div className="app">
-      <StatusBar state={state} onSelectModel={selectModel} />
+      <StatusBar
+        state={state}
+        onSelectModel={selectModel}
+        onToggleVoice={setVoice}
+        voiceVolume={voiceVolume}
+        onVoiceVolume={setVoiceVolume}
+      />
       <main className="app__body">
         <section className="avatar-stage">
           <AvatarView controller={avatar} characterId={session?.characterId ?? null} />

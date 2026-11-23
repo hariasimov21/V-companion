@@ -6,7 +6,7 @@ so any drift between the TypeScript and Python definitions breaks a test.
 
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, Field, TypeAdapter
+from pydantic import BaseModel, Field, StrictBool, TypeAdapter
 
 from app.character.registry import CHARACTER_ID_PATTERN
 from app.config.settings import PrivacySettings
@@ -14,7 +14,7 @@ from app.core.errors import ErrorCode
 from app.models.avatar import Emotion, Gesture
 from app.models.state import AssistantPhase
 
-PROTOCOL_VERSION = 4
+PROTOCOL_VERSION = 5
 # Ollama model names, e.g. "qwen3:14b" or "hf.co/user/repo:Q4_K_M".
 MODEL_NAME_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,199}$"
 
@@ -52,8 +52,15 @@ class SelectModel(BaseModel):
     model: str = Field(pattern=MODEL_NAME_PATTERN)
 
 
+class SetVoice(BaseModel):
+    """Turns the character's spoken voice on or off (remembered across restarts)."""
+
+    type: Literal["set_voice"] = "set_voice"
+    enabled: StrictBool
+
+
 ClientEvent = Annotated[
-    UserMessage | SpeechFinished | SelectCharacter | ClearConversation | SelectModel,
+    UserMessage | SpeechFinished | SelectCharacter | ClearConversation | SelectModel | SetVoice,
     Field(discriminator="type"),
 ]
 client_event_adapter: TypeAdapter[ClientEvent] = TypeAdapter(ClientEvent)
@@ -88,6 +95,9 @@ class SessionReady(BaseModel):
     ai_model: str | None
     ai_models: list[str]
     ai_model_loading: bool
+    # Voice: `available` = TTS service ready and the active character has a voice.
+    voice_available: bool
+    voice_enabled: bool
     privacy: PrivacySettings
     state: AssistantPhase
 
@@ -116,6 +126,30 @@ class ModelChanged(BaseModel):
     loading: bool
 
 
+class SpeechAudio(BaseModel):
+    """A piece of the spoken reply: base64 PCM, 16-bit little-endian, mono."""
+
+    type: Literal["speech_audio"] = "speech_audio"
+    utterance_id: int
+    seq: int = Field(ge=0)
+    sample_rate: int = Field(gt=0)
+    pcm: str
+
+
+class SpeechEnd(BaseModel):
+    """No more audio for this utterance (`ok` false: it failed or was cut short)."""
+
+    type: Literal["speech_end"] = "speech_end"
+    utterance_id: int
+    ok: bool
+
+
+class VoiceChanged(BaseModel):
+    type: Literal["voice_changed"] = "voice_changed"
+    available: bool
+    enabled: bool
+
+
 class StateChanged(BaseModel):
     type: Literal["state_changed"] = "state_changed"
     state: AssistantPhase
@@ -128,6 +162,9 @@ class AssistantMessage(BaseModel):
     emotion_intensity: float = Field(ge=0.0, le=1.0)
     gesture: Gesture
     look_at_user: bool
+    # When `voice` is true, speech_audio chunks for `utterance_id` follow, then speech_end.
+    utterance_id: int
+    voice: bool
 
 
 class ErrorEvent(BaseModel):
@@ -141,6 +178,9 @@ ServerEvent = Annotated[
     | CharacterChanged
     | ConversationCleared
     | ModelChanged
+    | SpeechAudio
+    | SpeechEnd
+    | VoiceChanged
     | StateChanged
     | AssistantMessage
     | ErrorEvent,

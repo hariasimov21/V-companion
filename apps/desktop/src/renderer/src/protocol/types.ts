@@ -3,7 +3,7 @@
  * Both sides are tested against shared/protocol-fixtures/ to catch drift.
  */
 
-export const PROTOCOL_VERSION = 4
+export const PROTOCOL_VERSION = 5
 
 export const EMOTIONS = [
   'neutral',
@@ -80,6 +80,9 @@ export interface SessionReadyEvent {
   ai_model: string | null
   ai_models: string[]
   ai_model_loading: boolean
+  /** Voice: available = TTS service ready and the active character has a voice. */
+  voice_available: boolean
+  voice_enabled: boolean
   privacy: PrivacySettings
   state: AssistantPhase
 }
@@ -117,6 +120,31 @@ export interface AssistantMessageEvent {
   emotion_intensity: number
   gesture: Gesture
   look_at_user: boolean
+  /** When `voice` is true, speech_audio chunks for this utterance follow, then speech_end. */
+  utterance_id: number
+  voice: boolean
+}
+
+/** A piece of a spoken reply: base64 PCM, 16-bit little-endian, mono. */
+export interface SpeechAudioEvent {
+  type: 'speech_audio'
+  utterance_id: number
+  seq: number
+  sample_rate: number
+  pcm: string
+}
+
+/** No more audio for this utterance (`ok` false: it failed or was cut short). */
+export interface SpeechEndEvent {
+  type: 'speech_end'
+  utterance_id: number
+  ok: boolean
+}
+
+export interface VoiceChangedEvent {
+  type: 'voice_changed'
+  available: boolean
+  enabled: boolean
 }
 
 export interface ErrorEvent {
@@ -130,6 +158,9 @@ export type ServerEvent =
   | CharacterChangedEvent
   | ConversationClearedEvent
   | ModelChangedEvent
+  | SpeechAudioEvent
+  | SpeechEndEvent
+  | VoiceChangedEvent
   | StateChangedEvent
   | AssistantMessageEvent
   | ErrorEvent
@@ -161,9 +192,16 @@ export interface SelectModelEvent {
   model: string
 }
 
+/** Turns the character's spoken voice on or off (remembered by the backend). */
+export interface SetVoiceEvent {
+  type: 'set_voice'
+  enabled: boolean
+}
+
 export type ClientEvent =
   | UserMessageEvent
   | SpeechFinishedEvent
   | SelectCharacterEvent
   | ClearConversationEvent
   | SelectModelEvent
+  | SetVoiceEvent

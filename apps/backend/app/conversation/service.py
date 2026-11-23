@@ -26,10 +26,17 @@ from app.models.protocol import (
     ServerEvent,
 )
 from app.models.state import AssistantPhase
+from app.speech.service import SpeechService
 
 log = get_logger("ai")
 
 REPLY_SCHEMA = AssistantReply.model_json_schema()
+# Rough token estimate for fitting the history into the model's context window. Spanish
+# text runs ~3.5-4 characters per token; 3 keeps a safety margin (and JSON replies are
+# denser).
+CHARS_PER_TOKEN = 3.0
+# Room left for the model's own reply (JSON with ~60-140 words of speech).
+REPLY_TOKEN_RESERVE = 600
 # A first consolidation over a long existing history is split into calls of this size.
 MAX_MESSAGES_PER_CONSOLIDATION = 60
 
@@ -51,6 +58,7 @@ class ConversationService:
         history_messages: int = 100,
         consolidator: MemoryConsolidator | None = None,
         memory_batch: int = 20,
+        speech: SpeechService | None = None,
     ) -> None:
         self._provider = provider
         self._character = character
@@ -67,12 +75,15 @@ class ConversationService:
         # Bumped when a conversation is forgotten, so an in-flight update is discarded.
         self._memory_generation: defaultdict[str, int] = defaultdict(int)
         self._model_loading = False
+        self._speech = speech
 
     async def handle_user_message(self, text: str) -> AssistantReply:
         if self._model_loading:
             raise BusyError("The model is still loading")
         if self._turn_lock.locked():
             raise BusyError("Still thinking about the previous message")
+        if self._speech is not None:
+            await self._speech.cancel()  # the user talking interrupts the character
         async with self._turn_lock:
             character = self._character
             self._state.mark_interaction()
@@ -82,7 +93,7 @@ class ConversationService:
             except AIProviderError:
                 await self._state.transition_to(AssistantPhase.ERROR)
                 raise
-            await self._deliver(reply)
+            await self._deliver(character, reply)
         self._maybe_consolidate(character)
         return reply
 
@@ -103,6 +114,8 @@ class ConversationService:
         if self._model_loading or self._turn_lock.locked():
             raise BusyError("Wait for the current answer before switching characters")
         async with self._turn_lock:
+            if self._speech is not None:
+                await self._speech.cancel()  # the previous character stops mid-sentence
             if character.id != self._character.id:
                 self._character = character
                 self._store.set_active_character(character.id)
@@ -115,6 +128,8 @@ class ConversationService:
                     history=self.history(),
                 )
             )
+            if self._speech is not None:
+                await self._speech.set_character(character)  # announces its voice, if any
 
     async def clear_conversation(self) -> None:
         """Forgets everything said with the active character, on disk too."""
@@ -124,6 +139,8 @@ class ConversationService:
             character = self._character
             self._memory_generation[character.id] += 1
             self._store.clear(character.id)
+            if self._speech is not None:
+                await self._speech.cancel()
             log.info("Conversation cleared", extra={"fields": {"character": character.id}})
             await self._settle_avatar()
             await self._publisher.publish(ConversationCleared(character_id=character.id))
@@ -223,20 +240,19 @@ class ConversationService:
         if not memory.is_empty:
             # Appended last, so the long static persona prefix stays cacheable by the model.
             system_prompt = f"{system_prompt}\n\n{render_memory(memory)}"
+        # The reminder rides inside the latest user turn (and is never stored): chat
+        # templates move system messages to the top (gpt-oss, qwen3) or drop them unless a
+        # user message comes last (mistral-nemo dropped the whole persona), so this is the
+        # only place every model reads it right before answering.
+        latest = ChatMessage(
+            role="user", content=f"{text}\n\n[{character.service.build_reminder()}]"
+        )
+        history = self._fit_to_context(
+            system_prompt, self._store.recent(character.id, self._context_messages), latest
+        )
         context = ChatContext(
             system_prompt=system_prompt,
-            messages=[
-                *self._store.recent(character.id, self._context_messages),
-                # The reminder rides inside the latest user turn (and is never stored):
-                # chat templates move system messages to the top (gpt-oss, qwen3) or drop
-                # them unless a user message comes last (mistral-nemo dropped the whole
-                # persona), so this is the only place every model reads it right before
-                # answering.
-                ChatMessage(
-                    role="user",
-                    content=f"{text}\n\n[{character.service.build_reminder()}]",
-                ),
-            ],
+            messages=[*history, latest],
             response_schema=REPLY_SCHEMA,
         )
         log.info("Request started", extra={"fields": {"provider": self._provider.name}})
@@ -323,8 +339,38 @@ class ConversationService:
             log.exception("Unexpected provider failure")
             raise AIProviderError("Unexpected AI error") from exc
 
-    async def _deliver(self, reply: AssistantReply) -> None:
+    def _fit_to_context(
+        self, system_prompt: str, history: list[ChatMessage], latest: ChatMessage
+    ) -> list[ChatMessage]:
+        """Drops the oldest messages that would overflow the model's context window.
+        Ollama would otherwise cut the *beginning* of the prompt: the persona itself."""
+        window = self._provider.context_window
+        if window is None:
+            return history
+        budget = (
+            window
+            - _estimate_tokens(system_prompt)
+            - _estimate_tokens(latest.content)
+            - REPLY_TOKEN_RESERVE
+        )
+        kept: list[ChatMessage] = []
+        for message in reversed(history):
+            budget -= _estimate_tokens(message.content)
+            if budget < 0:
+                break
+            kept.append(message)
+        if len(kept) < len(history):
+            log.warning(
+                "History trimmed to fit the context window",
+                extra={"fields": {"kept": len(kept), "of": len(history), "num_ctx": window}},
+            )
+        return kept[::-1]
+
+    async def _deliver(self, character: Character, reply: AssistantReply) -> None:
         self._state.set_emotion(reply.emotion)
+        speech = self._speech
+        voice = speech is not None and speech.will_speak(character)
+        utterance_id = speech.next_utterance_id() if speech is not None else 0
         await self._publisher.publish(
             AssistantMessage(
                 text=reply.speech,
@@ -332,9 +378,17 @@ class ConversationService:
                 emotion_intensity=reply.emotion_intensity,
                 gesture=reply.gesture,
                 look_at_user=reply.look_at_user,
+                utterance_id=utterance_id,
+                voice=voice,
             )
         )
         await self._state.transition_to(AssistantPhase.SPEAKING)
+        if voice and speech is not None:
+            speech.start(character, reply.speech, utterance_id)
+
+
+def _estimate_tokens(text: str) -> int:
+    return int(len(text) / CHARS_PER_TOKEN) + 4  # + per-message template overhead
 
 
 def _to_history_entry(message: ChatMessage) -> HistoryEntry:

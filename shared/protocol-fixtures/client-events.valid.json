@@ -4,5 +4,6 @@
   { "type": "select_character", "character_id": "mimi" },
   { "type": "clear_conversation" },
   { "type": "select_model", "model": "qwen3:14b" },
-  { "type": "select_model", "model": "hf.co/someone/Some-Model-GGUF:Q4_K_M" }
+  { "type": "select_model", "model": "hf.co/someone/Some-Model-GGUF:Q4_K_M" },
+  { "type": "set_voice", "enabled": false }
 ]

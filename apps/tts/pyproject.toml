@@ -1,0 +1,39 @@
+[project]
+name = "waifu-tts"
+version = "0.1.0"
+description = "Local text-to-speech service (Qwen3-TTS voice cloning via qwentts.cpp) for the virtual companion"
+requires-python = ">=3.12"
+dependencies = [
+    # qwentts.cpp (GGML + CUDA): Qwen3-TTS quantized, 6-8x real time, no PyTorch needed.
+    # Not on PyPI for Linux: `make setup-tts` adds the wheel index (CUDA 12.8 build).
+    "qwentts-cpp-python==0.5.0+cu128",
+    "numpy>=1.26",
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "pyyaml>=6.0",
+    "soundfile>=0.12",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.3", "httpx>=0.27"]
+
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["tts_service*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "ASYNC", "RUF"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["tts_service"]
